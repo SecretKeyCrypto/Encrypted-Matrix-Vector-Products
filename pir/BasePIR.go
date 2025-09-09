@@ -5,6 +5,7 @@ package pir
 */
 import "C"
 import (
+	"RandomLinearCodePIR/dataobjects"
 	"RandomLinearCodePIR/utils"
 	"math/rand"
 	"unsafe"
@@ -91,7 +92,7 @@ func (p *BasePIR) Query(sk SecretKey, queryIndex uint64) (*BasePIRQuery, *BasePI
 		mask ^= vector_1[i] * rng.Uint32()
 	}
 
-	vector_2 := make([]uint32, p.Params.CodewordLength)
+	vector_2 := dataobjects.AlignedMake[uint32](uint64(p.Params.CodewordLength))
 
 	flipVector := utils.RandomizeFlipVector(p.Params.NumberOfBlocks)
 
@@ -135,8 +136,8 @@ func (p *BasePIR) Answer(matrix *Matrix, clientQuery *BasePIRQuery) *BasePIRAnsw
 	// TODO : Make sure it devides
 	block_size := p.Params.CodewordLength / p.Params.NumberOfBlocks
 
-	result1 := make([]uint32, cols*rows/block_size)
-	result2 := make([]uint32, cols*rows/block_size)
+	result1 := dataobjects.AlignedMake[uint32](uint64(cols * rows / block_size))
+	result2 := dataobjects.AlignedMake[uint32](uint64(cols * rows / block_size))
 
 	cVector_1 := (*C.uint32_t)(unsafe.Pointer(&clientQuery.Vector_1[0]))
 	cVector_2 := (*C.uint32_t)(unsafe.Pointer(&clientQuery.Vector_2[0]))
@@ -153,7 +154,7 @@ func (p *BasePIR) Answer(matrix *Matrix, clientQuery *BasePIRQuery) *BasePIRAnsw
 }
 
 func (p *BasePIR) Decode(sk SecretKey, index uint64, response *BasePIRAnswer, aux *BasePIRAux) uint32 {
-	res := make([]uint32, p.Params.PackedSize)
+	res := dataobjects.AlignedMake[uint32](uint64(p.Params.PackedSize))
 	row := index / uint64(p.Params.Cols)
 	wordIndex := row / 32
 	bitOffset := row % 32

@@ -1,0 +1,3 @@
+[submodule "FasterNTT"]
+	path = FasterNTT
+	url = https://github.com/nict-sfl/FasterNTT

@@ -1,6 +1,8 @@
 package dataobjects
 
-import "math/rand"
+import (
+	"math/rand"
+)
 
 type Field interface {
 	Add(a, b uint32) uint32
@@ -9,6 +11,10 @@ type Field interface {
 	Neg(a uint32) uint32
 	Inv(a uint32) uint32
 	Mod() uint32
+	AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
+	MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64)
+	SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
+	NegVector(r []uint32, ro uint64, length uint64)
 	GetChar() uint32
 	SampleElementWithSeed(rng *rand.Rand) uint32
 	SampleElement() uint32
@@ -70,6 +76,46 @@ func (f *PrimeField) GetChar() uint32 {
 	return f.p
 }
 
+func (f *PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
+	if USE_FAST_CODE {
+		FieldAddVectors(r, ro, a, ao, b, bo, length, f.p)
+	} else {
+		for i := uint64(0); i < length; i++ {
+			r[ro+i] = uint32(uint64(a[ao+i]) + uint64(b[bo+i])%uint64(f.p))
+		}
+	}
+}
+
+func (f *PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64) {
+	if USE_FAST_CODE {
+		FieldMulVector(r, ro, a, ao, b, length, f.p)
+	} else {
+		for i := uint64(0); i < length; i++ {
+			r[ro+i] = uint32((uint64(a[ao+i]) * uint64(b)) % uint64(f.p))
+		}
+	}
+}
+
+func (f *PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
+	if USE_FAST_CODE {
+		FieldSubVectors(r, ro, a, ao, b, bo, length, f.p)
+	} else {
+		for i := uint64(0); i < length; i++ {
+			r[ro+i] = uint32((uint64(a[ao+i]) + uint64(f.p) - uint64(b[bo+i])) % uint64(f.p))
+		}
+	}
+}
+
+func (f *PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
+	if USE_FAST_CODE {
+		FieldNegVector(r, ro, length, f.p)
+	} else {
+		for i := uint64(0); i < length; i++ {
+			r[ro+i] = (f.p - r[ro+i]) % f.p
+		}
+	}
+}
+
 func (f *PrimeField) SampleElement() uint32 {
 	return uint32(rand.Intn(int(f.p)))
 }
@@ -79,7 +125,7 @@ func (f *PrimeField) SampleElementWithSeed(rng *rand.Rand) uint32 {
 }
 
 func (f *PrimeField) SampleInvertibleVec(n uint32) []uint32 {
-	vec := make([]uint32, n)
+	vec := AlignedMake[uint32](uint64(n))
 
 	for i := range vec {
 		vec[i] = uint32(rand.Intn(int(f.p)-1) + 1)
@@ -88,7 +134,7 @@ func (f *PrimeField) SampleInvertibleVec(n uint32) []uint32 {
 }
 
 func (f *PrimeField) SampleVector(n uint32) []uint32 {
-	vec := make([]uint32, n)
+	vec := AlignedMake[uint32](uint64(n))
 
 	for i := range vec {
 		vec[i] = uint32(rand.Intn(int(f.p)))
@@ -97,7 +143,7 @@ func (f *PrimeField) SampleVector(n uint32) []uint32 {
 }
 
 func (f *PrimeField) InvertVector(vec []uint32) []uint32 {
-	inv := make([]uint32, len(vec))
+	inv := AlignedMake[uint32](uint64(len(vec)))
 
 	for i := range vec {
 		inv[i] = f.Inv(vec[i])

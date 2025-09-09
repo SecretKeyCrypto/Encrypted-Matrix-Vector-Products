@@ -27,16 +27,14 @@ func (rmvp *RingSlsnMVP) GenerateTDM(sk SecretKey) []uint32 {
 
 func (rmvp *RingSlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint32) *dataobjects.Matrix {
 	params := rmvp.SlsnMVP.Params
-	encoded := make([]uint32, input.Rows*params.N)
+	encoded := dataobjects.AlignedMake[uint32](uint64(input.Rows * params.N))
 
 	for i := uint32(0); i < input.Rows; i++ {
 		copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
 		copy(encoded[i*params.N+params.L:(i+1)*params.N], rmvp.LinearCodeEncoder.EncodeDual(input.Data[i*params.L:(i+1)*params.L]))
 	}
 
-	for j := uint64(0); j < uint64(len(encoded)); j++ {
-		encoded[j] = params.Field.Add(encoded[j], mask[j])
-	}
+	params.Field.AddVectors(encoded, 0, encoded, 0, mask, 0, uint64(len(encoded)))
 
 	return &dataobjects.Matrix{
 		Rows: params.M,
@@ -50,16 +48,14 @@ func (rmvp *RingSlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux
 
 	nullspaceCoeff := params.Field.SampleVector(params.K)
 
-	queryVector := make([]uint32, params.N)
+	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N))
 
 	copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
 
 	copy(queryVector[:params.L], rmvp.LinearCodeEncoder.EncodeLSN(nullspaceCoeff))
 
 	// Add Vector v to c
-	for i := uint32(0); i < params.L; i++ {
-		queryVector[i] = params.Field.Add(queryVector[i], vec[i])
-	}
+	params.Field.AddVectors(queryVector, 0, queryVector, 0, vec, 0, uint64(params.L))
 
 	// The time is just for benchmark
 	start := time.Now()
@@ -71,9 +67,7 @@ func (rmvp *RingSlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux
 	coeff := params.Field.SampleInvertibleVec(params.S)
 
 	for i := uint32(0); i < params.S; i++ {
-		for j := uint32(0); j < params.B; j++ {
-			queryVector[i*params.B+j] = params.Field.Mul(queryVector[i*params.B+j], coeff[i])
-		}
+		params.Field.MulVector(queryVector, uint64(i*params.B), queryVector, uint64(i*params.B), coeff[i], uint64(params.B))
 	}
 
 	return &SlsnQuery{

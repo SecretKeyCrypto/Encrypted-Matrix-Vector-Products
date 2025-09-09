@@ -72,7 +72,7 @@ func (slsn *SlsnMVP) GenerateTDM(sk SecretKey) []uint32 {
 func (slsn *SlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint32) *dataobjects.Matrix {
 	params := slsn.Params
 	rlcMatrix := linearcode.Generate1DRLCMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
-	encoded := make([]uint32, input.Rows*params.N)
+	encoded := dataobjects.AlignedMake[uint32](uint64(input.Rows * params.N))
 
 	for i := uint32(0); i < input.Rows; i++ {
 		copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
@@ -82,9 +82,7 @@ func (slsn *SlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint3
 	}
 
 	// Add Masks
-	for j := uint64(0); j < uint64(len(encoded)); j++ {
-		encoded[j] = params.Field.Add(encoded[j], mask[j])
-	}
+	params.Field.AddVectors(encoded, 0, encoded, 0, mask, 0, uint64(len(encoded)))
 
 	return &dataobjects.Matrix{
 		Rows: params.M,
@@ -104,16 +102,14 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 	// Sample codeword c From NullSpace
 	nullspaceCoeff := params.Field.SampleVector(params.K)
 
-	queryVector := make([]uint32, params.N)
+	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N))
 
 	MatVecProduct(PofDual, nullspaceCoeff, queryVector, params.L, params.K, params.P)
 
 	copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
 
 	// Add Vector v to c
-	for i := uint32(0); i < params.L; i++ {
-		queryVector[i] = params.Field.Add(queryVector[i], vec[i])
-	}
+	params.Field.AddVectors(queryVector, 0, queryVector, 0, vec, 0, uint64(params.L))
 
 	// The time is just for benchmark
 	start := time.Now()
@@ -125,9 +121,7 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 	coeff := params.Field.SampleInvertibleVec(params.S)
 
 	for i := uint32(0); i < params.S; i++ {
-		for j := uint32(0); j < params.B; j++ {
-			queryVector[i*params.B+j] = params.Field.Mul(queryVector[i*params.B+j], coeff[i])
-		}
+		params.Field.MulVector(queryVector, uint64(i*params.B), queryVector, uint64(i*params.B), coeff[i], uint64(params.B))
 	}
 
 	return &SlsnQuery{
@@ -141,7 +135,7 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 
 func (slsn *SlsnMVP) Answer(encodedMatrix dataobjects.Matrix, clientQuery SlsnQuery) []uint32 {
 	params := slsn.Params
-	result := make([]uint32, params.S*params.M)
+	result := dataobjects.AlignedMake[uint32](uint64(params.S * params.M))
 
 	BlockMatVecProduct(encodedMatrix.Data, clientQuery.Vec, result, params.M, params.N, params.S, params.P)
 	return result
@@ -152,7 +146,7 @@ func (slsn *SlsnMVP) Decode(sk SecretKey, response []uint32, aux SlsnAux) []uint
 
 	vec := params.Field.InvertVector(aux.Coeff)
 
-	result := make([]uint32, params.M)
+	result := dataobjects.AlignedMake[uint32](uint64(params.M))
 
 	BlockVecMatProduct(response, vec, result, params.S, params.M, 1, params.P)
 	// Unmask

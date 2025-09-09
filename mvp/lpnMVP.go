@@ -77,10 +77,10 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 	rowPerSlice := params.M / params.M_1
 	entryPerSlice := rowPerSlice * params.N
 
-	encoded := make([]uint32, uint64(entryPerSlice)*uint64(params.ECCLength))
+	encoded := dataobjects.AlignedMake[uint32](uint64(entryPerSlice * params.ECCLength))
 
 	// Re-use slot for ECC encoding
-	message := make([]uint32, params.ECCLength)
+	message := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
 
 	generatorMatrix := ecc.GetECCCode(ecc.ECCConfig{
 		Name: params.ECCName,
@@ -123,9 +123,7 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 	for i := uint64(0); i < uint64(params.ECCLength); i++ {
 		start := i * uint64(entryPerSlice)
 
-		for j := uint64(0); j < uint64(entryPerSlice); j++ {
-			encoded[start+j] = params.Field.Add(encoded[start+j], masks[i][j])
-		}
+		params.Field.AddVectors(encoded, start, encoded, start, masks[i], 0, uint64(entryPerSlice))
 	}
 
 	return &dataobjects.Matrix{
@@ -144,8 +142,8 @@ func (lpn *LpnMVP) Query(sk SecretKey, vec []uint32) (*LpnQuery, *LpnAux) {
 	}
 
 	// ECCLength Slice, each with length N
-	queryVector := make([]uint32, params.N*params.ECCLength)
-	masks := make([]uint32, params.M*params.ECCLength/params.M_1)
+	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N * params.ECCLength))
+	masks := dataobjects.AlignedMake[uint32](uint64(params.M * params.ECCLength / params.M_1))
 
 	noisyQueryIndicator := make([]bool, params.ECCLength)
 
@@ -158,16 +156,12 @@ func (lpn *LpnMVP) Query(sk SecretKey, vec []uint32) (*LpnQuery, *LpnAux) {
 
 		if !utils.IsZeroVector(e) {
 			noisyQueryIndicator[t] = true
-			for i := uint32(0); i < params.L; i++ {
-				queryVector[t*params.N+i] = params.Field.Add(queryVector[t*params.N+i], e[i])
-			}
+			params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), e, 0, uint64(params.L))
 		}
 
 		copy(queryVector[t*params.N+params.L:t*params.N+params.N], r[:params.K])
 
-		for i := uint64(0); i < uint64(params.L); i++ {
-			queryVector[uint64(t*params.N)+i] = params.Field.Add(queryVector[uint64(t*params.N)+i], vec[i])
-		}
+		params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), vec, 0, uint64(params.L))
 		mask := sk.TDM.EvaluationCircuitPerSlice(queryVector[t*params.N:(t+1)*params.N], int64(t))
 
 		copy(masks[t*params.M/params.M_1:], mask)
@@ -189,7 +183,7 @@ func (lpn *LpnMVP) Answer(encodedMatrix *dataobjects.Matrix, clientQuery *LpnQue
 	rowPerSlice := params.M / params.M_1
 	entryPerSlice := rowPerSlice * params.N
 
-	answers := make([]uint32, rowPerSlice*params.ECCLength)
+	answers := dataobjects.AlignedMake[uint32](uint64(rowPerSlice * params.ECCLength))
 
 	for i := uint32(0); i < params.ECCLength; i++ {
 		MatVecProduct(encodedMatrix.Data[i*entryPerSlice:(i+1)*entryPerSlice],
@@ -208,13 +202,11 @@ func (lpn *LpnMVP) Decode(sk SecretKey, response *LpnResponse, aux *LpnAux) []ui
 	params := lpn.Params
 
 	// Unmask
-	for i := range response.Answers {
-		response.Answers[i] = params.Field.Sub(response.Answers[i], aux.Masks[i])
-	}
+	params.Field.SubVectors(response.Answers, 0, response.Answers, 0, aux.Masks, 0, uint64(len(response.Answers)))
 
-	result := make([]uint32, params.M)
+	result := dataobjects.AlignedMake[uint32](uint64(params.M))
 
-	code := make([]uint32, params.ECCLength)
+	code := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
 
 	ecccode := ecc.GetECCCode(ecc.ECCConfig{Name: params.ECCName, Q: params.P, N: params.ECCLength, K: params.M_1})
 

@@ -47,7 +47,7 @@ func (ec *EvaluationCode) GenerateV() [][]uint32 {
 func (ec *EvaluationCode) encode(message []uint32) []uint32 {
 	l := len(message)
 	if l < int(ec.n) {
-		newMessage := make([]uint32, ec.n)
+		newMessage := dataobjects.AlignedMake[uint32](uint64(ec.n))
 		copy(newMessage, message)
 		message = newMessage
 	}
@@ -58,9 +58,7 @@ func (ec *EvaluationCode) encode(message []uint32) []uint32 {
 // Dual Code C = (I//-V) -V has dimension K x L
 func (ec *EvaluationCode) EncodeDual(message []uint32) []uint32 {
 	encoded := ec.encode(message)[:ec.K]
-	for i := range encoded {
-		encoded[i] = ec.Field.Neg(encoded[i])
-	}
+	ec.Field.NegVector(encoded, 0, uint64(len(encoded)))
 	return encoded
 }
 

@@ -1,6 +1,9 @@
 package ecc
 
-import "errors"
+import (
+	"RandomLinearCodePIR/dataobjects"
+	"errors"
+)
 
 type ReedSolomonCode struct {
 	k uint32
@@ -19,14 +22,14 @@ func NewReedSolomonCode(k, n, q uint32) *ReedSolomonCode {
 // Only return the evaluation part
 func (rs *ReedSolomonCode) GetGeneratorMatrix(M_1, ECCLength, p uint32) []uint32 {
 	alphas := getAlphas(ECCLength)
-	rsGeneratorMatrix := make([]uint32, M_1*ECCLength)
+	rsGeneratorMatrix := dataobjects.AlignedMake[uint32](uint64(M_1 * ECCLength))
 
 	GenerateSystematicRSMatrix(ECCLength, M_1, p, alphas, rsGeneratorMatrix)
 	return rsGeneratorMatrix[M_1*M_1:]
 }
 
 func getAlphas(ECCLength uint32) []uint32 {
-	alphas := make([]uint32, ECCLength)
+	alphas := dataobjects.AlignedMake[uint32](uint64(ECCLength))
 	for i := range alphas {
 		alphas[i] = uint32(i)
 	}
@@ -37,8 +40,8 @@ func (rs *ReedSolomonCode) Decode(code []uint32, noisyQuery []bool) ([]uint32, e
 	if isAllFalse(noisyQuery[:rs.k]) {
 		return code[:rs.k], nil
 	} else {
-		x_in := make([]uint32, rs.k)
-		y_in := make([]uint32, rs.k)
+		x_in := dataobjects.AlignedMake[uint32](uint64(rs.k))
+		y_in := dataobjects.AlignedMake[uint32](uint64(rs.k))
 		idx := uint32(0)
 		for i := range noisyQuery {
 			if !noisyQuery[i] && idx < rs.k {

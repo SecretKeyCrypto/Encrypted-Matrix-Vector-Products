@@ -1,6 +1,7 @@
 package pir
 
 import (
+	"RandomLinearCodePIR/dataobjects"
 	"math"
 	"math/rand"
 )
@@ -17,7 +18,7 @@ func GenerateMatrix(rows, cols, entryBits uint32, seed int64) Matrix {
 
 	dataSize := uint64(rows) * uint64(cols)
 
-	data := make([]uint32, dataSize)
+	data := dataobjects.AlignedMake[uint32](uint64(dataSize))
 
 	bitmask := uint32((1 << entryBits) - 1)
 
@@ -38,7 +39,7 @@ func GenerateRandomMatrix(rows, cols uint32, seed int64) [][]uint32 {
 	matrix := make([][]uint32, rows)
 
 	for i := uint32(0); i < rows; i++ {
-		matrix[i] = make([]uint32, cols)
+		matrix[i] = dataobjects.AlignedMake[uint32](uint64(cols))
 		for j := uint32(0); j < cols; j++ {
 			matrix[i][j] = rng.Uint32() % 2 // Random F₂ value (0 or 1)
 		}
@@ -52,7 +53,7 @@ func GeneratePrimeFieldMatrix(rows, cols, p uint32, seed int64) Matrix {
 
 	dataSize := uint64(rows) * uint64(cols)
 
-	data := make([]uint32, dataSize)
+	data := dataobjects.AlignedMake[uint32](uint64(dataSize))
 
 	for i := range data {
 		data[i] = uint32(rng.Intn(int(p)))
@@ -68,7 +69,7 @@ func GeneratePrimeFieldMatrix(rows, cols, p uint32, seed int64) Matrix {
 
 func PackAndTransposeMatrix(matrix [][]uint32, rows, cols uint32) []uint32 {
 	packedSize := (rows + 31) / 32 * cols // Each column stores 32 rows
-	packedData := make([]uint32, packedSize)
+	packedData := dataobjects.AlignedMake[uint32](uint64(packedSize))
 
 	// Column-major packing (transpose)
 	for col := uint32(0); col < cols; col++ {

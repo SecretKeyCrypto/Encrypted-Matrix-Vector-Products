@@ -1,6 +1,7 @@
 package pir
 
 import (
+	"RandomLinearCodePIR/dataobjects"
 	"RandomLinearCodePIR/utils"
 	"math/rand"
 )
@@ -21,7 +22,7 @@ func GenerateRandomColsOfRLC(N, M uint32, seed int64) [][]uint32 {
 	matrix := make([][]uint32, N)
 
 	for i := uint32(0); i < N; i++ {
-		matrix[i] = make([]uint32, M-N)
+		matrix[i] = dataobjects.AlignedMake[uint32](uint64(M - N))
 	}
 
 	for j := uint32(0); j < M-N; j++ {
@@ -40,7 +41,7 @@ func SystematicEncoding(M uint32, seed int64, matrix Matrix) [][]uint32 {
 
 	encodedMatrix := make([][]uint32, matrix.Rows)
 	for i := range encodedMatrix {
-		encodedMatrix[i] = make([]uint32, M)
+		encodedMatrix[i] = dataobjects.AlignedMake[uint32](uint64(M))
 	}
 
 	for row := uint32(0); row < matrix.Rows; row++ {
@@ -70,7 +71,7 @@ func SystematicEncoding(M uint32, seed int64, matrix Matrix) [][]uint32 {
 // We can do XOR of the columns while we know the column i is composed by the ith column of P and the ith unit vector
 func SampleVectorFromNullSpace(N, M uint32, seed int64) []uint32 {
 	coeff := utils.RandomizeBinaryVector(M - N)
-	res := make([]uint32, M)
+	res := dataobjects.AlignedMake[uint32](uint64(M))
 
 	for i := uint32(0); i < M-N; i++ {
 		if coeff[i] == 1 {
