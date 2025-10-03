@@ -1,8 +1,7 @@
 #ifndef _MOD_SIMD_H
 #define _MOD_SIMD_H
 
-// #include <emmintrin.h>  // SSE2 intrinsics
-// #include <immintrin.h>
+#include <immintrin.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -11,7 +10,7 @@
 const uint32_t _not_prime_power = ~0U;
 
 inline uint32_t _mersenne_prime_power(uint32_t modulus) {
-    if (modulus && ((modulus & (modulus - 1)) != 0)) return _not_prime_power;
+    if (modulus && ((modulus & (modulus + 1)) != 0)) return _not_prime_power;
     uint32_t power = 0;
     if (0xFFFF0000U & modulus) power += 16;
     if (0xFF00FF00U & modulus) power += 8;

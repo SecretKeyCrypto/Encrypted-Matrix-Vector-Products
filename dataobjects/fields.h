@@ -7,6 +7,11 @@
 extern "C" {
 #endif
 
+void FieldModVector(
+    uint32_t* r, uint64_t ro,
+    uint64_t length, uint32_t p
+);
+
 void FieldAddVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,

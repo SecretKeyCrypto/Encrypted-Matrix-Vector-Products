@@ -284,11 +284,11 @@ func TestMixedSLSNAnswer(t *testing.T) {
 	for j := range vec_1 {
 		vec_sum[j] = vec_1[j] ^ vec_2[j]
 	}
-	fmt.Println(vec_1)
-	fmt.Println(vec_2)
+	//fmt.Println(vec_1)
+	//fmt.Println(vec_2)
 	start := time.Now()
-	ans := pi.Answer(&encodedMatrix, &MixedSLSNPIRQuery{vec: VectorF4{Cols: col, Bit1: vec_1, BitP: vec_2, BitSum: vec_sum}})
-	fmt.Println(ans)
+	pi.Answer(&encodedMatrix, &MixedSLSNPIRQuery{vec: VectorF4{Cols: col, Bit1: vec_1, BitP: vec_2, BitSum: vec_sum}})
+	//fmt.Println(ans)
 	totalDuration += time.Since(start)
 
 	fmt.Printf("\nBenchmark Server Response For Encoded Database with %d x %d entires of size ~%fMB. \n",

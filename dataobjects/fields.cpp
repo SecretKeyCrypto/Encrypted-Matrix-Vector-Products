@@ -331,6 +331,13 @@ inline void AVX2NegVector(uint32_t* r, uint64_t length, uint32_t p) {
 
 extern "C" {
 
+void FieldModVector(
+    uint32_t* r, uint64_t ro,
+    uint64_t length, uint32_t p
+) {
+    vector_mod_op(r, r, p, length);
+}
+
 void FieldAddVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,

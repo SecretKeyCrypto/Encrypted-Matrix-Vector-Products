@@ -3,13 +3,15 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include "mvp.h"
-//#include <mach/mach_time.h>
 #include <cassert>
 #include <mutex>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
+
+#include "mvp.h"
+#include "../dataobjects/dataobj.h"
+#include "../dataobjects/fields.h"
 
 // -----------------------------------------------------------------------------
 // Core templated implementation (no C linkage)
@@ -139,11 +141,10 @@ void BlockMatVecProduct(const uint32_t* __restrict__ mat,    // matrix: size n Ã
     assert(m % s == 0);
     uint32_t b = m / s;  // columns per block
 
-    for (uint32_t blk = 0; blk < s; ++blk) {
-        const uint32_t* mat_blk = mat + blk * n * b;
-        const uint32_t* vec_blk = vec + blk * b;
-        uint32_t* result_blk = result + blk * n;
-
+    const uint32_t* mat_blk = mat;
+    const uint32_t* vec_blk = vec;
+    uint32_t* result_blk = result;
+    for (uint32_t blk = 0; blk < s; ++blk, mat_blk += n * b, vec_blk += b, result_blk += n) {
         // mat_blk is n Ã— b (row-major)
         MatVecProduct(mat_blk, vec_blk, result_blk, n, b, p);
     }
@@ -153,33 +154,51 @@ void BlockMatVecProduct(const uint32_t* __restrict__ mat,    // matrix: size n Ã
 // M x v
 void MatVecProduct(const uint32_t* mat, const uint32_t* vec, uint32_t* result, uint32_t n, uint32_t m, uint32_t p)
 {
-    for (int row = 0; row < n; ++row) {
-        const uint32_t* row_ptr = mat + row * m;
+    if (USE_FAST_CODE) {
+        assert(uint64_t(p-1) * uint64_t(m) < 1ULL << 31);
+        memset(result, 0, sizeof(result[0]) * n);
+        alignas(64) uint32_t prod[m];
+        for (int row = 0; row < n; ++row) {
+            const uint32_t* row_ptr = mat + row * m;
 
-        uint64_t acc = 0;
-        for (int col = 0; col < m; ++col) {
-            acc = (acc + ((uint64_t)row_ptr[col] * vec[col]))  ;
+            FieldMulVectors(prod, 0, row_ptr, 0, vec, 0, m, p);
+            for (int col = 0; col < m; ++col) {
+                // TODO: the next line (since prod is reduced modulu p) would overflow when (p-1)*m >= (1<<31)
+                result[row] += prod[col];
+            }
         }
+        FieldModVector(result, 0, n, p);
+    } else {
+        for (int row = 0; row < n; ++row) {
+            const uint32_t* row_ptr = mat + row * m;
 
-        result[row] = acc % p;
+            uint64_t acc = 0;
+            for (int col = 0; col < m; ++col) {
+                acc = (acc + ((uint64_t)row_ptr[col] * vec[col]));
+            }
+
+            result[row] = acc % p;
+        }
     }
 }
 
 void BlockVecMatProduct(const uint32_t* mat, const uint32_t* vec, uint32_t* result, uint32_t n, uint32_t m, uint32_t s, uint32_t p)
 {
+    assert(n % s == 0);
     int b = n / s;
+
     // 1) zero out the final 32-bit result buffer
     std::memset(result, 0, sizeof(uint32_t) * size_t(s) * m);
 
     // 2) temp 64-bit accumulators: one per column in a block
-    std::vector<uint64_t> acc(m);
+    alignas(64) uint64_t acc[m];
 
     for (uint32_t blk = 0; blk < s; ++blk) {
         uint32_t row_start = blk * b;
         uint32_t* res_ptr  = result + blk * size_t(m);
 
         // reset accumulators to zero
-        std::fill(acc.begin(), acc.end(), 0);
+        memset(acc, 0, sizeof(acc));
 
         // accumulate products for all b rows in this block
         for (uint32_t i = 0; i < b; ++i) {
