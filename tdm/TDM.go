@@ -130,6 +130,7 @@ func (td *TDM) EvaluationCircuitPerSlice(v []uint32, sliceNum int64) []uint32 {
 
 	masks := dataobjects.AlignedMake[uint32](uint64(td.m))
 	bv := dataobjects.AlignedMake[uint32](uint64(td.block))
+	defer dataobjects.Aligned1DFree(bv)
 	for j := uint32(0); j < td.n/td.block; j++ {
 		copy(bv, v[j*td.block:(j+1)*td.block])
 		for i := uint32(0); i < td.m/td.block; i++ {
@@ -145,6 +146,7 @@ func (td *TDM) EvaluationCircuitPerSlice(v []uint32, sliceNum int64) []uint32 {
 		}
 	}
 
+	// The slice starting from 0 is critical for it to be correctly freed
 	return masks[0:td.M]
 }
 

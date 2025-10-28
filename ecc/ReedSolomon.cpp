@@ -10,7 +10,7 @@ using namespace NTL;
 extern "C" {
 
 void GenerateSystematicRSMatrix_uint32(
-    uint32_t n, uint32_t m, uint32_t q,
+    uint32_t n, uint32_t m, uint32_t q, uint32_t m_0,
     const uint32_t* alphas_in, // length n
     uint32_t* output           // length n * m, row-major
 ) {
@@ -45,7 +45,7 @@ void GenerateSystematicRSMatrix_uint32(
     }
 
     // Fill G row by row: top m rows = identity, bottom = evaluations
-    for (uint32_t row = 0; row < n; row++) {
+    for (uint32_t row = m_0; row < n; row++) {
         for (uint32_t col = 0; col < m; col++) {
             ZZ_p val;
             if (row < m) {
@@ -54,7 +54,7 @@ void GenerateSystematicRSMatrix_uint32(
                 val = eval(lagrange_basis[col], alphas[row]);
 
             }
-            output[row * m + col] = conv<uint32_t>(rep(val));  // store raw value as uint32_t
+            output[(row - m_0) * m + col] = conv<uint32_t>(rep(val));  // store raw value as uint32_t
         }
     }
 }

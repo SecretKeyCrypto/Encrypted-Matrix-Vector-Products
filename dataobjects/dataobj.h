@@ -6,6 +6,8 @@
 
 const bool USE_FAST_CODE = true;
 
+#define USE_FAST_CODE_WITH_CUDA
+
 // #define EMVP_ALIGNMENT 16
 // #define EMVP_ALIGNAS alignas(EMVP_ALIGNMENT)
 

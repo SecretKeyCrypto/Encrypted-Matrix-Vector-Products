@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const VERBOSE_PRINTS = false
+
 /*
 	 ================================================================================
 					Test and Benchmarks for 2D Split LSN based PIR
@@ -143,7 +145,7 @@ func BenchmarkQueryGeneration(b *testing.B) {
 	b.StopTimer()
 
 	fmt.Printf("\nBenchmark Query Generation For m = %d, l = %d, k = %d\n", row, col, k)
-	fmt.Printf("\nCommunicatio Cost for %d MB database is %f KB\n", (row*col)>>20, float64(len(pirQuery.Vector_1)+len(pirQuery.Vector_2))/float64(1024))
+	fmt.Printf("\nCommunication Cost for %d MB database is %f KB\n", (row*col)>>20, float64(len(pirQuery.Vector_1)+len(pirQuery.Vector_2))/float64(1024))
 	fmt.Printf("\tAverage Query Time with repeat times: %d: %v \n\n", b.N, totalDuration/time.Duration(b.N))
 }
 
@@ -284,12 +286,16 @@ func TestMixedSLSNAnswer(t *testing.T) {
 	for j := range vec_1 {
 		vec_sum[j] = vec_1[j] ^ vec_2[j]
 	}
-	fmt.Println(vec_1)
-	fmt.Println(vec_2)
+	if VERBOSE_PRINTS {
+		fmt.Println(vec_1)
+		fmt.Println(vec_2)
+	}
 	start := time.Now()
 	ans := pi.Answer(&encodedMatrix, &MixedSLSNPIRQuery{vec: VectorF4{Cols: col, Bit1: vec_1, BitP: vec_2, BitSum: vec_sum}})
-	fmt.Println(ans)
 	totalDuration += time.Since(start)
+	if VERBOSE_PRINTS {
+		fmt.Println(ans)
+	}
 
 	fmt.Printf("\nBenchmark Server Response For Encoded Database with %d x %d entires of size ~%fMB. \n",
 		encodedMatrix.Rows, encodedMatrix.Cols, float64(encodedMatrix.Rows/1024.0)*float64(encodedMatrix.Cols)/1024.0*32/8.0)

@@ -9,9 +9,9 @@ package ecc
 import "C"
 import "unsafe"
 
-func GenerateSystematicRSMatrix(ECCLength, M_1, p uint32, alphas, output []uint32) {
+func GenerateSystematicRSMatrix(ECCLength, M_1, p, M_0 uint32, alphas, output []uint32) {
 	C.GenerateSystematicRSMatrix_uint32(
-		C.uint32_t(ECCLength), C.uint32_t(M_1), C.uint32_t(p),
+		C.uint32_t(ECCLength), C.uint32_t(M_1), C.uint32_t(p), C.uint32_t(M_0),
 		(*C.uint32_t)(unsafe.Pointer(&alphas[0])),
 		(*C.uint32_t)(unsafe.Pointer(&output[0])))
 }

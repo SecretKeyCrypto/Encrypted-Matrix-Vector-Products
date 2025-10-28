@@ -44,25 +44,32 @@ func (ec *EvaluationCode) GenerateV() [][]uint32 {
 	return V
 }
 
-func (ec *EvaluationCode) encode(message []uint32) []uint32 {
+func (ec *EvaluationCode) encode(message []uint32) ([]uint32, bool) {
 	l := len(message)
+	isNew := false
 	if l < int(ec.n) {
 		newMessage := dataobjects.AlignedMake[uint32](uint64(ec.n))
 		copy(newMessage, message)
 		message = newMessage
+		isNew = true
 	}
 	tdm.NTT(message, ec.n, ec.omega, ec.Field.GetChar())
-	return message
+	return message, isNew
 }
 
 // Dual Code C = (I//-V) -V has dimension K x L
-func (ec *EvaluationCode) EncodeDual(message []uint32) []uint32 {
-	encoded := ec.encode(message)[:ec.K]
+func (ec *EvaluationCode) EncodeDual(message []uint32) ([]uint32, bool) {
+	encoded, isNew := ec.encode(message)
+	// The slice starting from 0 is critical for it to be correctly freed
+	encoded = encoded[:ec.K]
 	ec.Field.NegVector(encoded, 0, uint64(len(encoded)))
-	return encoded
+	return encoded, isNew
 }
 
 // Dual Code D = (V//I)
-func (ec *EvaluationCode) EncodeLSN(message []uint32) []uint32 {
-	return ec.encode(message)[:ec.L]
+func (ec *EvaluationCode) EncodeLSN(message []uint32) ([]uint32, bool) {
+	encoded, isNew := ec.encode(message)
+	// The slice starting from 0 is critical for it to be correctly freed
+	encoded = encoded[:ec.L]
+	return encoded, isNew
 }

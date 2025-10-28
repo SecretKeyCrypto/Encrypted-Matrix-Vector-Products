@@ -31,14 +31,27 @@ type LpnQuery struct {
 	NumOfQueries uint32
 }
 
+func (lpnQuery *LpnQuery) Free() {
+	lpnQuery.Vec = dataobjects.Aligned1DFree(lpnQuery.Vec)
+}
+
 type LpnAux struct {
 	NoisyQueryIndicator []bool
 	Masks               []uint32
 }
 
+func (lpnAux *LpnAux) Free() {
+	lpnAux.NoisyQueryIndicator = dataobjects.Aligned1DFree(lpnAux.NoisyQueryIndicator)
+	lpnAux.Masks = dataobjects.Aligned1DFree(lpnAux.Masks)
+}
+
 type LpnResponse struct {
 	Answers []uint32
 	AnsLen  uint32
+}
+
+func (lpnResponse *LpnResponse) Free() {
+	lpnResponse.Answers = dataobjects.Aligned1DFree(lpnResponse.Answers)
 }
 
 func (lpn *LpnMVP) KeyGen(seed int64) SecretKey {
@@ -72,6 +85,7 @@ func (lpn *LpnMVP) GenerateTDM(sk SecretKey) [][]uint32 {
 func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint32) *dataobjects.Matrix {
 	params := lpn.Params
 	rlcMatrix := linearcode.Generate1DRLCMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
+	defer dataobjects.Aligned1DFree(rlcMatrix)
 
 	// Assume M_1 | M for now
 	rowPerSlice := params.M / params.M_1
@@ -81,12 +95,14 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 
 	// Re-use slot for ECC encoding
 	message := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
+	defer dataobjects.Aligned1DFree(message)
 
 	generatorMatrix := ecc.GetECCCode(ecc.ECCConfig{
 		Name: params.ECCName,
 		Q:    params.P,
 		N:    params.ECCLength,
 		K:    params.M_1}).GetGeneratorMatrix(params.M_1, params.ECCLength, params.P)
+	defer dataobjects.Aligned1DFree(generatorMatrix)
 
 	for i := uint32(0); i < rowPerSlice; i++ {
 		for j := uint32(0); j < params.M_1; j++ {
@@ -163,6 +179,7 @@ func (lpn *LpnMVP) Query(sk SecretKey, vec []uint32) (*LpnQuery, *LpnAux) {
 
 		params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), vec, 0, uint64(params.L))
 		mask := sk.TDM.EvaluationCircuitPerSlice(queryVector[t*params.N:(t+1)*params.N], int64(t))
+		defer dataobjects.Aligned1DFree(mask)
 
 		copy(masks[t*params.M/params.M_1:], mask)
 	}
@@ -207,6 +224,7 @@ func (lpn *LpnMVP) Decode(sk SecretKey, response *LpnResponse, aux *LpnAux) []ui
 	result := dataobjects.AlignedMake[uint32](uint64(params.M))
 
 	code := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
+	defer dataobjects.Aligned1DFree(code)
 
 	ecccode := ecc.GetECCCode(ecc.ECCConfig{Name: params.ECCName, Q: params.P, N: params.ECCLength, K: params.M_1})
 
@@ -216,6 +234,7 @@ func (lpn *LpnMVP) Decode(sk SecretKey, response *LpnResponse, aux *LpnAux) []ui
 		}
 
 		message, err := ecccode.Decode(code, aux.NoisyQueryIndicator)
+		defer dataobjects.Aligned1DFree(message)
 
 		if err != nil {
 			panic(err)

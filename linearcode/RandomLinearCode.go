@@ -52,7 +52,7 @@ func GenerateP(L, K uint32, field dataobjects.Field, seed int64) [][]uint32 {
 func Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, seed int64) []uint32 {
 	P := GenerateP(L, K, p, seed)
 
-	vmatrix := dataobjects.AlignedMake[uint32](uint64(K * L))
+	vmatrix := dataobjects.AlignedMake[uint32](uint64(K) * uint64(L))
 
 	idx := 0
 

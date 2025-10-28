@@ -5,3 +5,9 @@ type Matrix struct {
 	Cols uint32
 	Data []uint32
 }
+
+func (matrix *Matrix) Free() {
+	if matrix.Data != nil {
+		matrix.Data = Aligned1DFree(matrix.Data)
+	}
+}

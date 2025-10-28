@@ -18,6 +18,10 @@ type SecretKey struct {
 	TDM             *tdm.TDM
 }
 
+func (sk *SecretKey) Free() {
+	sk.PreLoadedMatrix = dataobjects.Aligned1DFree(sk.PreLoadedMatrix)
+}
+
 // N = K + L denotes the length of the codeword
 // Encoding Matrix D with dimension N x L
 // Original Data Matrix has dimension M x N
@@ -40,10 +44,19 @@ type SlsnQuery struct {
 	Vec []uint32
 }
 
+func (slsnQuery *SlsnQuery) Free() {
+	slsnQuery.Vec = dataobjects.Aligned1DFree(slsnQuery.Vec)
+}
+
 type SlsnAux struct {
 	Coeff []uint32
 	Masks []uint32
 	Dur   time.Duration
+}
+
+func (slsnAux *SlsnAux) Free() {
+	slsnAux.Coeff = dataobjects.Aligned1DFree(slsnAux.Coeff)
+	slsnAux.Masks = dataobjects.Aligned1DFree(slsnAux.Masks)
 }
 
 func (slsn *SlsnMVP) KeyGen(seed int64) SecretKey {
@@ -86,6 +99,7 @@ func (slsn *SlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint3
 
 	blockwizeEncodedMatrix := dataobjects.AlignedMake[uint32](uint64(len(encoded)))
 	TransformToBlockwise(encoded, blockwizeEncodedMatrix, params.M, params.N, params.S)
+	encoded = dataobjects.Aligned1DFree(encoded)
 
 	return &dataobjects.Matrix{
 		Rows: params.M,
@@ -100,6 +114,7 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 	PofDual := sk.PreLoadedMatrix
 	if len(PofDual) == 0 {
 		PofDual = linearcode.Generate1DDualMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
+		defer dataobjects.Aligned1DFree(PofDual)
 	}
 
 	// Sample codeword c From NullSpace

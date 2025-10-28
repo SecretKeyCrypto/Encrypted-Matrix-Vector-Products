@@ -28,10 +28,15 @@ func (rmvp *RingSlsnMVP) GenerateTDM(sk SecretKey) []uint32 {
 func (rmvp *RingSlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint32) *dataobjects.Matrix {
 	params := rmvp.SlsnMVP.Params
 	encoded := dataobjects.AlignedMake[uint32](uint64(input.Rows * params.N))
+	defer dataobjects.Aligned1DFree(encoded)
 
 	for i := uint32(0); i < input.Rows; i++ {
 		copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
-		copy(encoded[i*params.N+params.L:(i+1)*params.N], rmvp.LinearCodeEncoder.EncodeDual(input.Data[i*params.L:(i+1)*params.L]))
+		encodedDual, encodedDualIsNew := rmvp.LinearCodeEncoder.EncodeDual(input.Data[i*params.L : (i+1)*params.L])
+		if encodedDualIsNew {
+			defer dataobjects.Aligned1DFree(encodedDual)
+		}
+		copy(encoded[i*params.N+params.L:(i+1)*params.N], encodedDual)
 	}
 
 	params.Field.AddVectors(encoded, 0, encoded, 0, mask, 0, uint64(len(encoded)))
@@ -51,12 +56,17 @@ func (rmvp *RingSlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux
 	params := rmvp.SlsnMVP.Params
 
 	nullspaceCoeff := params.Field.SampleVector(params.K)
+	defer dataobjects.Aligned1DFree(nullspaceCoeff)
 
 	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N))
 
 	copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
 
-	copy(queryVector[:params.L], rmvp.LinearCodeEncoder.EncodeLSN(nullspaceCoeff))
+	encodedNullspaceCoeff, encodedNullspaceCoeffIsNew := rmvp.LinearCodeEncoder.EncodeLSN(nullspaceCoeff)
+	if encodedNullspaceCoeffIsNew {
+		defer dataobjects.Aligned1DFree(encodedNullspaceCoeff)
+	}
+	copy(queryVector[:params.L], encodedNullspaceCoeff)
 
 	// Add Vector v to c
 	params.Field.AddVectors(queryVector, 0, queryVector, 0, vec, 0, uint64(params.L))
