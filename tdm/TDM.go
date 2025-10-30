@@ -36,20 +36,20 @@ type TDM struct {
 	block  uint32
 }
 
-func (td *TDM) GenerateTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int64) [][]uint32 {
+func (td *TDM) GenerateTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int64) []uint32 {
 	td.updateInternalUseParams()
-	fullTDM := make([][]uint32, td.m)
-	for i := range fullTDM {
-		fullTDM[i] = dataobjects.AlignedMake[uint32](uint64(td.n))
-	}
+	fullTDM := dataobjects.AlignedMake[uint32](uint64(td.m) * uint64(td.n))
 
 	for i := uint32(0); i < td.m/td.block; i++ {
 		for j := uint32(0); j < td.n/td.block; j++ {
 			seed := int64(i*td.m/td.block + j)
 			blockTDM := td.GenerateBasicTrapDooredMatrix(seedL+seed, seedPL+seed, seedC+seed, seedPR+seed, seedR+seed)
+			defer dataobjects.Aligned1DFree(blockTDM)
 
 			for k := uint32(0); k < td.block; k++ {
-				copy(fullTDM[i*td.block+k][j*td.block:], blockTDM[k])
+				i0 := i*td.block + k
+				j0 := j * td.block
+				copy(fullTDM[i0*td.n+j0:(i0+1)*td.n], blockTDM[k*td.block:(k+1)*td.block])
 			}
 		}
 	}
@@ -58,28 +58,26 @@ func (td *TDM) GenerateTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int6
 }
 
 // The basic Trapdoor matrix has the form R = S_L * Pi_L * S * Pi_R * S_R where it expands k x k matrix by factor of the ExpansionFactor (2)
-func (td *TDM) GenerateBasicTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int64) [][]uint32 {
-	S_R := GetQuasiCyclicMatrix(td.block, td.Q, seedR)
-
+func (td *TDM) GenerateBasicTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int64) []uint32 {
 	permR := GetPermutation(ExpansionFactor*td.block, seedPR)
-	PermuteRowsInPlace(S_R, permR)
+	defer dataobjects.Aligned1DFree(permR)
+	S_R := GetQuasiCyclicMatrix(td.block, td.Q, seedR, permR)
+	defer dataobjects.Aligned1DFree(S_R)
 
 	// R = S x perm(S_R)
-	R := CirculantMatrixMul(ExpansionFactor*td.block, td.Q, td.root2K, seedC, S_R)
-
 	permL := GetPermutation(ExpansionFactor*td.block, seedPL)
-	PermuteRowsInPlace(R, permL)
+	defer dataobjects.Aligned1DFree(permL)
+	R := CirculantMatrixMul(ExpansionFactor*td.block, td.Q, td.root2K, seedC, S_R, 2*td.block, td.block, permL)
+	defer dataobjects.Aligned1DFree(R)
 
 	// S_L has the form [I | C]
-	L := CirculantMatrixMul(td.block, td.Q, td.rootK, seedL, R[td.block:])
+	L := CirculantMatrixMul(td.block, td.Q, td.rootK, seedL, R[td.block*td.block:], (ExpansionFactor-1)*td.block, td.block, nil)
 	if dataobjects.USE_FAST_CODE {
-		for i := uint32(0); i < td.block; i++ {
-			dataobjects.FieldAddVectors(L[i], 0, R[i], 0, L[i], 0, uint64(td.block), td.Q)
-		}
+		dataobjects.FieldAddVectors(L, 0, R, 0, L, 0, uint64(td.block*td.block), td.Q)
 	} else {
 		for i := uint32(0); i < td.block; i++ {
 			for j := uint32(0); j < td.block; j++ {
-				L[i][j] = uint32((uint64(R[i][j]) + uint64(L[i][j])) % uint64(td.Q))
+				L[i*td.block+j] = uint32((uint64(R[i*td.block+j]) + uint64(L[i*td.block+j])) % uint64(td.Q))
 			}
 		}
 	}
@@ -89,26 +87,30 @@ func (td *TDM) GenerateBasicTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR
 
 func (td *TDM) GenerateFlattenedTrapDooredMatrix() []uint32 {
 	result := dataobjects.AlignedMake[uint32](uint64(td.M * td.N))
+	// rely on td.updateInternalUseParams() in next line for td.n later
 	R := td.GenerateTrapDooredMatrix(td.SeedL, td.SeedPL, td.SeedC, td.SeedPR, td.SeedR)
+	defer dataobjects.Aligned1DFree(R)
 
 	// Only return the upper-left cornor of the TDM
 	for i := uint32(0); i < td.M; i++ {
-		copy(result[i*td.N:(i+1)*td.N], R[i])
+		copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
 	}
 	return result
 }
 
 func (td *TDM) GenerateFlattenedTrapDooredMatrixPerSlice(sliceNum int64) []uint32 {
 	result := dataobjects.AlignedMake[uint32](uint64(td.M * td.N))
+	// rely on td.updateInternalUseParams() in next line for td.n later
 	R := td.GenerateTrapDooredMatrix(td.SeedL+sliceNum*SliceSeedShift,
 		td.SeedPL+sliceNum*SliceSeedShift,
 		td.SeedC+sliceNum*SliceSeedShift,
 		td.SeedPR+sliceNum*SliceSeedShift,
 		td.SeedR+sliceNum*SliceSeedShift)
+	defer dataobjects.Aligned1DFree(R)
 
 	// Only return the upper-left cornor of the TDM
 	for i := uint32(0); i < td.M; i++ {
-		copy(result[i*td.N:(i+1)*td.N], R[i])
+		copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
 	}
 	return result
 }
@@ -153,41 +155,48 @@ func (td *TDM) EvaluationCircuitPerSlice(v []uint32, sliceNum int64) []uint32 {
 func (td *TDM) EvaluationCircuitBasic(v []uint32, addOnSeed int64) []uint32 {
 	// S_R = [I | C] x v
 	resR := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	copy(resR, v)
-	vec := CirculantVectorMul(td.block, td.Q, td.rootK, td.SeedR+addOnSeed, v)
-	copy(resR[td.block:], vec)
+	defer dataobjects.Aligned1DFree(resR)
+	vecR := CirculantVectorMul(td.block, td.Q, td.rootK, td.SeedR+addOnSeed, v, nil)
+	defer dataobjects.Aligned1DFree(vecR)
 
 	// Apply PermR
-	perm := GetPermutation(ExpansionFactor*td.block, td.SeedPR+addOnSeed)
-	PermuteVectorInPlace(resR, perm)
+	permR := GetPermutation(ExpansionFactor*td.block, td.SeedPR+addOnSeed)
+	defer dataobjects.Aligned1DFree(permR)
+	for i := uint32(0); i < ExpansionFactor*td.block; i++ {
+		ii := permR[i]
+		if ii < td.block {
+			resR[i] = v[ii]
+		} else {
+			ix := ii - td.block
+			resR[i] = vecR[ix]
+		}
+	}
 
 	// Multiply by S
-	resC := CirculantVectorMul(ExpansionFactor*td.block, td.Q, td.root2K, td.SeedC+addOnSeed, resR)
-
-	// Apply PermL
-	perm = GetPermutation(ExpansionFactor*td.block, td.SeedPL+addOnSeed)
-	PermuteVectorInPlace(resC, perm)
+	permC := GetPermutation(ExpansionFactor*td.block, td.SeedPL+addOnSeed)
+	defer dataobjects.Aligned1DFree(permC)
+	resC := CirculantVectorMul(ExpansionFactor*td.block, td.Q, td.root2K, td.SeedC+addOnSeed, resR, permC)
 
 	// S_L = [I // C] x resC
-	vec = CirculantVectorMul(td.block, td.Q, td.rootK, td.SeedL+addOnSeed, resC[td.block:])
+	vecC := CirculantVectorMul(td.block, td.Q, td.rootK, td.SeedL+addOnSeed, resC[td.block:], nil)
+	defer dataobjects.Aligned1DFree(vecC)
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldAddVectors(resC, 0, resC, 0, vec, 0, uint64(td.block), td.Q)
+		dataobjects.FieldAddVectors(resC, 0, resC, 0, vecC, 0, uint64(td.block), td.Q)
 	} else {
 		for i := uint32(0); i < td.block; i++ {
-			resC[i] = uint32((uint64(resC[i]) + uint64(vec[i])) % uint64(td.Q))
+			resC[i] = uint32((uint64(resC[i]) + uint64(vecC[i])) % uint64(td.Q))
 		}
 	}
 
 	return resC[:td.block]
 }
 
-func CirculantMatrixMul(blockSize, q, root uint32, seed int64, mat [][]uint32) [][]uint32 {
-	result := make([][]uint32, blockSize)
-	for i := range result {
-		result[i] = dataobjects.AlignedMake[uint32](uint64(len(mat[0])))
-	}
+func CirculantMatrixMul(blockSize, q, root uint32, seed int64, mat []uint32, matRows, matCols uint32, perm []uint32) []uint32 {
+	result := dataobjects.AlignedMake[uint32](uint64(blockSize) * uint64(matCols))
 	polyQC := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(polyQC)
 	res := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(res)
 
 	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
 		utils.RandomizeVectorWithModulusAndSeed(polyQC, blockSize, q, seed)
@@ -203,23 +212,35 @@ func CirculantMatrixMul(blockSize, q, root uint32, seed int64, mat [][]uint32) [
 	}
 
 	v := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(v)
+	tmpA := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(tmpA)
+	tmpB := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(tmpB)
 
-	for j := 0; j < len(mat[0]); j++ {
-		for i := range mat {
-			v[i] = mat[i][j]
+	for j := uint32(0); j < matCols; j++ {
+		for i := uint32(0); i < matRows; i++ {
+			v[i] = mat[i*matCols+j]
 		}
-		NTT_Convolution(polyQC, v, res, blockSize, root, q)
-		for i := range res {
-			result[i][j] = res[i]
+		NTT_Convolution(polyQC, v, tmpA, tmpB, res, blockSize, root, q)
+		if perm == nil {
+			for i := uint32(0); i < uint32(len(res)); i++ {
+				result[i*matCols+j] = res[i]
+			}
+		} else {
+			for i := uint32(0); i < uint32(len(res)); i++ {
+				ii := perm[i]
+				result[i*matCols+j] = res[ii]
+			}
 		}
 	}
 
 	return result
 }
 
-func CirculantVectorMul(blockSize, q, root uint32, seed int64, v []uint32) []uint32 {
-	result := dataobjects.AlignedMake[uint32](uint64(blockSize))
+func CirculantVectorMul(blockSize, q, root uint32, seed int64, v, perm []uint32) []uint32 {
 	polyQC := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(polyQC)
 
 	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
 		utils.RandomizeVectorWithModulusAndSeed(polyQC, blockSize, q, seed)
@@ -234,57 +255,23 @@ func CirculantVectorMul(blockSize, q, root uint32, seed int64, v []uint32) []uin
 		}
 	}
 
-	NTT_Convolution(polyQC, v, result, blockSize, root, q)
-	return result
-}
+	tmpA := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(tmpA)
+	tmpB := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	defer dataobjects.Aligned1DFree(tmpB)
+	conv := dataobjects.AlignedMake[uint32](uint64(blockSize))
+	NTT_Convolution(polyQC, v, tmpA, tmpB, conv, blockSize, root, q)
 
-func PermuteRowsInPlace(matrix [][]uint32, perm []uint32) {
-	n := uint32(len(matrix))
-
-	for i := uint32(0); i < n; i++ {
-		if perm[i] == i {
-			continue
+	if perm == nil {
+		return conv
+	} else {
+		defer dataobjects.Aligned1DFree(conv)
+		result := dataobjects.AlignedMake[uint32](uint64(blockSize))
+		for i := uint32(0); i < blockSize; i++ {
+			ii := perm[i]
+			result[i] = conv[ii]
 		}
-
-		j := i
-		temp := matrix[i]
-		for {
-			next := perm[j]
-			perm[j] = j
-
-			if next == i {
-				matrix[j] = temp
-				break
-			}
-
-			matrix[j] = matrix[next]
-			j = next
-		}
-	}
-}
-
-func PermuteVectorInPlace(vec []uint32, perm []uint32) {
-	n := uint32(len(vec))
-
-	for i := uint32(0); i < n; i++ {
-		if perm[i] == i {
-			continue
-		}
-
-		j := i
-		temp := vec[i]
-		for {
-			next := perm[j]
-			perm[j] = j
-
-			if next == i {
-				vec[j] = temp
-				break
-			}
-
-			vec[j] = vec[next]
-			j = next
-		}
+		return result
 	}
 }
 
@@ -302,33 +289,31 @@ func GetPermutation(n uint32, seed int64) []uint32 {
 }
 
 // Q has the form [I // C] where C is a circulant matrix
-func GetQuasiCyclicMatrix(blockSize, q uint32, seed int64) [][]uint32 {
+func GetQuasiCyclicMatrix(blockSize, q uint32, seed int64, perm []uint32) []uint32 {
 	row := 2 * blockSize
-	Q := make([][]uint32, row)
-	for i := uint32(0); i < row; i++ {
-		Q[i] = dataobjects.AlignedMake[uint32](uint64(blockSize))
-	}
-
-	for i := uint32(0); i < blockSize; i++ {
-		Q[i][i] = 1
-	}
+	Q := dataobjects.AlignedMake[uint32](uint64(row) * uint64(blockSize))
 
 	S := GetCirculantMatrix(blockSize, q, seed)
+	defer dataobjects.Aligned1DFree(S)
 
-	for i := uint32(0); i < blockSize; i++ {
-		copy(Q[blockSize+i], S[i])
+	for i := uint32(0); i < row; i++ {
+		ii := perm[i]
+		if ii < blockSize {
+			Q[i*blockSize+ii] = 1
+		} else {
+			ix := ii - blockSize
+			copy(Q[i*blockSize:(i+1)*blockSize], S[ix*blockSize:(ix+1)*blockSize])
+		}
 	}
 
 	return Q
 }
 
-func GetCirculantMatrix(k, q uint32, seed int64) [][]uint32 {
-	S := make([][]uint32, k)
-	for i := uint32(0); i < k; i++ {
-		S[i] = dataobjects.AlignedMake[uint32](uint64(k))
-	}
+func GetCirculantMatrix(k, q uint32, seed int64) []uint32 {
+	S := dataobjects.AlignedMake[uint32](uint64(k) * uint64(k))
 
 	poly := dataobjects.AlignedMake[uint32](uint64(k))
+	defer dataobjects.Aligned1DFree(poly)
 	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
 		utils.RandomizeVectorWithModulusAndSeed(poly, k, q, seed)
 	} else {
@@ -340,14 +325,14 @@ func GetCirculantMatrix(k, q uint32, seed int64) [][]uint32 {
 
 	if dataobjects.USE_FAST_CODE {
 		for t := uint32(0); t < k; t++ {
-			copy(S[t][t:k], poly[0:k-t])
-			copy(S[t][0:t], poly[k-t:k])
+			copy(S[t*k+t:t*k+k], poly[0:k-t])
+			copy(S[t*k+0:t*k+t], poly[k-t:k])
 		}
 	} else {
 		for i := uint32(0); i < k; i++ {
 			for t := uint32(0); t < k; t++ {
-				copy(S[t][t:k], poly[0:k-t])
-				copy(S[t][0:t], poly[k-t:k])
+				copy(S[t*k+t:t*k+k], poly[0:k-t])
+				copy(S[t*k+0:t*k+t], poly[k-t:k])
 			}
 		}
 	}

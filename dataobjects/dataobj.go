@@ -8,10 +8,12 @@ import (
 	"unsafe"
 )
 
+const USE_FAST_CODE_WITH_CUDA = false
+
 const ALIGNMENT uint64 = 64 // aligns up to AVX512
 
 // AlignedMake creates a slice of type T with a specified length and default alignment.
-func AlignedMake[T Primitive](length uint64) []T {
+func AlignedMake[T Primitive](length uint64) Array[T] {
 	if length == 0 {
 		return make([]T, length)
 	}
@@ -26,12 +28,35 @@ func AlignedMake[T Primitive](length uint64) []T {
 	return unsafe.Slice((*T)(unsafe.Pointer(&bytearr[0])), length)
 }
 
+func MakeVector(length uint64) Vector {
+	return Vector(AlignedMake[uint32](length))
+}
+
 func Aligned1DFree[T Primitive](array []T) []T {
 	// NO-OP - the caller is expected to drop the array
 	return nil
 }
 
 func Aligned2DFree[T Primitive](array [][]T) [][]T {
+	// NO-OP - the caller is expected to drop the array
+	return nil
+}
+
+func (v Array[T]) Free() Array[T] {
+	// NO-OP - the caller is expected to drop the array
+	return nil
+}
+
+func (v Array2[T]) Free() Array2[T] {
+	// NO-OP - the caller is expected to drop the array
+	return nil
+}
+
+func (v Vector) Free() Vector {
+	return nil
+}
+
+func (v Vector2) Free() Vector2 {
 	// NO-OP - the caller is expected to drop the array
 	return nil
 }

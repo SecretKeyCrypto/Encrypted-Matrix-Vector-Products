@@ -11,6 +11,7 @@ package dataobjects
 void* cuda_alloc(size_t size) {
     void* ptr;
     cudaMallocManaged(&ptr, size, cudaMemAttachGlobal);
+	cudaMemset(ptr, 0, size);
     return ptr;
 }
 
@@ -27,6 +28,8 @@ import (
 	"reflect"
 	"unsafe"
 )
+
+const USE_FAST_CODE_WITH_CUDA = true
 
 // Allocate returns a Go slice backed by CUDA-managed memory.
 func AlignedMake[T any](length uint64) []T {
@@ -49,6 +52,24 @@ func Aligned2DFree[T any](array [][]T) [][]T {
 			array[i] = Aligned1DFree(array[i])
 		}
 	}
+	return nil
+}
+
+func (v Array[T]) Free() Array[T] {
+	return Aligned1DFree(v)
+}
+
+func (v Array2[T]) Free() Array2[T] {
+	return Aligned2DFree(v)
+}
+
+func (v Vector) Free() Vector {
+	Array[uint32](v).Free()
+	return nil
+}
+
+func (v Vector2) Free() Vector2 {
+	Array2[uint32](v).Free()
 	return nil
 }
 

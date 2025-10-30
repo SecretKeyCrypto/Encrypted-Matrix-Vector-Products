@@ -1,11 +1,66 @@
+#ifdef USE_FAST_CODE_WITH_CUDA
+
+#include "fields.h"
+#include "cudafields.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int FieldAddVectors(
+    uint32_t* r, uint64_t ro,
+    const uint32_t* a, uint64_t ao,
+    const uint32_t* b, uint64_t bo,
+    uint64_t length, uint32_t p
+) {
+    return CudaFieldAddVectors(r, ro, a, ao, b, bo, length, p);
+}
+
+int FieldMulVector(
+    uint32_t* r, uint64_t ro,
+    const uint32_t* a, uint64_t ao,
+    uint32_t b,
+    uint64_t length, uint32_t p
+) {
+    return CudaFieldMulVector(r, ro, a, ao, b, length, p);
+}
+
+int FieldMulVectors(
+    uint32_t* r, uint64_t ro,
+    const uint32_t* a, uint64_t ao,
+    const uint32_t* b, uint64_t bo,
+    uint64_t length, uint32_t p
+) {
+    return CudaFieldMulVectors(r, ro, a, ao, b, bo, length, p);
+}
+
+int FieldSubVectors(
+    uint32_t* r, uint64_t ro,
+    const uint32_t* a, uint64_t ao,
+    const uint32_t* b, uint64_t bo,
+    uint64_t length, uint32_t p
+) {
+    return CudaFieldSubVectors(r, ro, a, ao ,b, bo, length, p);
+}
+
+int FieldNegVector(
+    uint32_t* r, uint64_t ro,
+    uint64_t length, uint32_t p
+) {
+    return CudaFieldNegVector(r, ro, length, p);
+}
+
+} /* extern "C" */
+
+#else /* USE_FAST_CODE_WITH_CUDA */
+
 #include "fields.h"
 #include "mod_simd.h"
-#include <iostream>
-#include <stdint.h>
 
 inline void NoSimdAddVectors(uint32_t* r, const uint32_t* a, const uint32_t* b, uint64_t length, uint32_t p) {
     for (uint64_t i = 0; i < length; ++i) {
-        r[i] = uint32_t((uint64_t(a[i]) + uint64_t(b[i])) % uint64_t(p));
+        uint64_t t = uint64_t(a[i]) + uint64_t(b[i]);
+        r[i] = uint32_t(t >= p ? t - p : p);
     }
 }
 
@@ -23,13 +78,14 @@ inline void NoSimdMulVectors(uint32_t* r, const uint32_t* a, const uint32_t* b, 
 
 inline void NoSimdSubVectors(uint32_t* r, const uint32_t* a, const uint32_t* b, uint64_t length, uint32_t p) {
     for (uint64_t i = 0; i < length; ++i) {
-        r[i] = uint32_t((uint64_t(a[i]) + uint64_t(p) - uint64_t(b[i])) % uint64_t(p));
+        
+        r[i] = (a[i] >= b[i]) ? (a[i] - b[i]) : (p - (b[i] - a[i]));
     }
 }
 
 inline void NoSimdNegVector(uint32_t* r, uint64_t length, uint32_t p) {
     for (uint64_t i = 0; i < length; ++i) {
-        r[i] = uint32_t((uint64_t(p) - uint64_t(r[i])) % uint64_t(p));
+        r[i] = (r[i] == 0) ? 0 : (p - r[i]);
     }
 }
 
@@ -329,9 +385,11 @@ inline void AVX2NegVector(uint32_t* r, uint64_t length, uint32_t p) {
 }
 #endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
-void FieldAddVectors(
+int FieldAddVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
@@ -344,9 +402,10 @@ void FieldAddVectors(
 #else
     NoSimdAddVectors(r + ro, a + ao, b + bo, length, p);
 #endif
+    return 1;
 }
 
-void FieldMulVector(
+int FieldMulVector(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     uint32_t b,
@@ -359,9 +418,10 @@ void FieldMulVector(
 #else
     NoSimdMulVector(r + ro, a + ao, b, length, p);
 #endif
+    return 1;
 }
 
-void FieldMulVectors(
+int FieldMulVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
@@ -374,9 +434,10 @@ void FieldMulVectors(
 #else
     NoSimdMulVectors(r + ro, a + ao, b + bo, length, p);
 #endif
+    return 1;
 }
 
-void FieldSubVectors(
+int FieldSubVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
@@ -389,9 +450,10 @@ void FieldSubVectors(
 #else
     NoSimdSubVectors(r + ro, a + ao, b + bo, length, p);
 #endif
+    return 1;
 }
 
-void FieldNegVector(
+int FieldNegVector(
     uint32_t* r, uint64_t ro,
     uint64_t length, uint32_t p
 ) {
@@ -402,6 +464,9 @@ void FieldNegVector(
 #else
     NoSimdNegVector(r + ro, length, p);
 #endif
+    return 1;
 }
 
-}
+} /* extern "C" */
+
+#endif /* USE_FAST_CODE_WITH_CUDA */

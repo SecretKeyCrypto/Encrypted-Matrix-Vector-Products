@@ -1,5 +1,5 @@
-#ifndef _FIELDS_H
-#define _FIELDS_H
+#ifndef _CUDAFIELDS_H
+#define _CUDAFIELDS_H
 
 #include <stdint.h>
 
@@ -7,35 +7,35 @@
 extern "C" {
 #endif
 
-int FieldAddVectors(
+int CudaFieldAddVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
     uint64_t length, uint32_t p
 );
 
-int FieldMulVector(
+int CudaFieldMulVector(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     uint32_t b,
     uint64_t length, uint32_t p
 );
 
-int FieldMulVectors(
+int CudaFieldMulVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
     uint64_t length, uint32_t p
 );
 
-int FieldSubVectors(
+int CudaFieldSubVectors(
     uint32_t* r, uint64_t ro,
     const uint32_t* a, uint64_t ao,
     const uint32_t* b, uint64_t bo,
     uint64_t length, uint32_t p
 );
 
-int FieldNegVector(
+int CudaFieldNegVector(
     uint32_t* r, uint64_t ro,
     uint64_t length, uint32_t p
 );
@@ -44,4 +44,4 @@ int FieldNegVector(
 }
 #endif
 
-#endif /* _FIELDS_H */
+#endif /* _CUDAFIELDS_H */

@@ -12,9 +12,11 @@ import (
 	"unsafe"
 )
 
-func NTT_Convolution(dataA, dataB, result []uint32, degree, root, q uint32) {
+func NTT_Convolution(dataA, dataB, tmpA, tmpB, result []uint32, degree, root, q uint32) {
 	C.ntt_convolution((*C.uint32_t)(unsafe.Pointer(&dataA[0])),
 		(*C.uint32_t)(unsafe.Pointer(&dataB[0])),
+		(*C.uint32_t)(unsafe.Pointer(&tmpA[0])),
+		(*C.uint32_t)(unsafe.Pointer(&tmpB[0])),
 		(*C.uint32_t)(unsafe.Pointer(&result[0])),
 		C.size_t(degree), C.uint32_t(root), C.uint32_t(q))
 	runtime.KeepAlive((dataA))

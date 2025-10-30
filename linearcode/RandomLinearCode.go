@@ -10,22 +10,27 @@ import (
 func Generate1DDualMatrix(L, K uint32, field dataobjects.Field, seed int64) []uint32 {
 	P := GenerateP(L, K, field, seed)
 
-	vmatrix := dataobjects.AlignedMake[uint32](uint64(K * L))
+	if dataobjects.USE_FAST_CODE {
+		dataobjects.FieldNegVector(P, 0, uint64(K*L), field.Mod())
+		return P
+	} else {
+		vmatrix := dataobjects.AlignedMake[uint32](uint64(K * L))
 
-	idx := 0
+		idx := 0
 
-	for i := uint32(0); i < L; i++ {
-		for j := uint32(0); j < K; j++ {
-			vmatrix[idx] = field.Neg(P[i][j])
-			idx += 1
+		for i := uint32(0); i < L; i++ {
+			for j := uint32(0); j < K; j++ {
+				vmatrix[idx] = field.Neg(P[i*K+j])
+				idx += 1
+			}
 		}
-	}
 
-	return vmatrix
+		return vmatrix
+	}
 }
 
-func GenerateP(L, K uint32, field dataobjects.Field, seed int64) [][]uint32 {
-	P := make([][]uint32, L)
+func GenerateP(L, K uint32, field dataobjects.Field, seed int64) []uint32 {
+	P := make([]uint32, L*K)
 
 	var rng *rand.Rand
 	if dataobjects.USE_FAST_CODE {
@@ -34,13 +39,12 @@ func GenerateP(L, K uint32, field dataobjects.Field, seed int64) [][]uint32 {
 		rng = rand.New(rand.NewSource(seed))
 	}
 
-	for i := uint32(0); i < L; i++ {
-		P[i] = dataobjects.AlignedMake[uint32](uint64(K))
-		if dataobjects.USE_FAST_CODE {
-			utils.RandomizeVectorWithModulus(P[i], K, field.Mod())
-		} else {
+	if dataobjects.USE_FAST_CODE {
+		utils.RandomizeVectorWithModulus(P, L*K, field.Mod())
+	} else {
+		for i := uint32(0); i < L; i++ {
 			for j := uint32(0); j < K; j++ {
-				P[i][j] = field.SampleElementWithSeed(rng)
+				P[i*K+j] = field.SampleElementWithSeed(rng)
 			}
 		}
 	}
@@ -51,6 +55,7 @@ func GenerateP(L, K uint32, field dataobjects.Field, seed int64) [][]uint32 {
 // Generate D = (I | P), transpose to D' = (I // P^T) and flatten
 func Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, seed int64) []uint32 {
 	P := GenerateP(L, K, p, seed)
+	defer dataobjects.Aligned1DFree(P)
 
 	vmatrix := dataobjects.AlignedMake[uint32](uint64(K) * uint64(L))
 
@@ -58,7 +63,7 @@ func Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, seed int64) []uint32 
 
 	for j := uint32(0); j < K; j++ {
 		for i := uint32(0); i < L; i++ {
-			vmatrix[idx] = P[i][j]
+			vmatrix[idx] = P[i*K+j]
 			idx += 1
 		}
 	}

@@ -305,7 +305,7 @@ void orig_ntt(u32* a, size_t n, u32 root, u32 mod) {
 void orig_intt(u32* a, size_t n, u32 root, u32 mod) {
     u32 inv_root = mod_inv(root, mod);
 
-    ntt(a, n, inv_root, mod);
+    orig_ntt(a, n, inv_root, mod);
 
     u32 inv_n = mod_inv(n, mod);
     if (USE_FAST_CODE) {
@@ -342,10 +342,7 @@ void intt(u32* a, size_t n, u32 root, u32 mod) {
 }
 
 // Convolution using NTT
-void ntt_convolution(const u32* a, const u32* b, u32* result, size_t n, u32 root, u32 mod) {
-    u32 fa[n];
-    u32 fb[n];
-
+void ntt_convolution(const u32* a, const u32* b, u32* fa, u32* fb, u32* result, size_t n, u32 root, u32 mod) {
     if (USE_FAST_CODE) {
         memcpy(fa, a, n * sizeof(u32));
         memcpy(fb, b, n * sizeof(u32));
@@ -360,8 +357,8 @@ void ntt_convolution(const u32* a, const u32* b, u32* result, size_t n, u32 root
     constexpr size_t qNum = 1;
     uint64_t p[qNum] = {mod};
     FNTT_R rq(n, p, 0);
-    ntt(rq, fa, n);
-    ntt(rq, fb, n);
+    fntt_ntt(rq, fa, n);
+    fntt_ntt(rq, fb, n);
 #else
     ntt(fa, n, root, mod);
     ntt(fb, n, root, mod);
@@ -374,30 +371,13 @@ void ntt_convolution(const u32* a, const u32* b, u32* result, size_t n, u32 root
         for (size_t i = 0; i < n; ++i) {
             result[i] = _mod_op((u64)fa[i] * fb[i], mod);
         }
-        // int count = 1;
-        // FieldMulVectors(result, 0, fa, 0, fb, 0, n, mod);
-        // for (size_t i = 0; i < n; ++i) {
-        //     // fa[i] = _mod_op((u64)fa[i] * fb[i], mod);
-        //     u32 tmp = _mod_op((u64)fa[i] * fb[i], mod);
-        //     // if (count > 0 && tmp != result[i]) {
-        //     //     if (count == 5) std::cerr << "================" << std::endl;
-        //     //     --count;
-        //     //     std::cerr << "i=" << i << " correct=" << tmp << " incorrect=" << result[i] << std::endl;
-        //     // }
-        //     result[i] = tmp;
-        // }
     }
 
 #ifdef USE_FASTERNTT
     intt(rq, result, n);
 #else
-    // intt(fa, n, root, mod);
     intt(result, n, root, mod);
 #endif
-
-    // for (size_t i = 0; i < n; ++i) {
-    //     result[i] = fa[i];
-    // }
 }
 
 inline void poly_mod_xt_minus_1(const u32* a, u32* b, size_t n, size_t t, u32 mod) {

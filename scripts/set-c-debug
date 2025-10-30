@@ -1,0 +1,4 @@
+export CXXFLAGS=-g
+export NVCCFLAGS=-g
+export CGO_CFLAGS=-g
+export CGO_CXXFLAGS=-g

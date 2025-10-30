@@ -17,7 +17,7 @@ void ntt(u32* a, size_t n, u32 root, u32 mod);
 // Performs in-place inverse NTT
 //FIXME void intt(u32* a, size_t n, u32 root, u32 mod);
 
-void ntt_convolution(const u32* a, const u32* b, u32* result, size_t n, u32 root, u32 mod);
+void ntt_convolution(const u32* a, const u32* b, u32* fa, u32* fb, u32* result, size_t n, u32 root, u32 mod);
 
 uint32_t NthRootOfUnity(u32 M, u32 N);
 

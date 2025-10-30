@@ -1,0 +1,4 @@
+export CXXFLAGS="-g -O2 -fno-omit-frame-pointer"
+export NVCCFLAGS="-g -O2"
+export CGO_CFLAGS="-g -O2 -fno-omit-frame-pointer"
+export CGO_CXXFLAGS="-g -O2 -fno-omit-frame-pointer"

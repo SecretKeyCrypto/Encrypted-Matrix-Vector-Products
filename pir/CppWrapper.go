@@ -1,6 +1,7 @@
 package pir
 
 /*
+#cgo LDFLAGS: -L../tdm -L../ecc -lNTT -lReedSolomon -lntl -lgmp
 #include "BitMVP.h"
 */
 import "C"

@@ -36,6 +36,7 @@ func (ec *EvaluationCode) Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, 
 	return []uint32{}
 }
 
+/*
 func (ec *EvaluationCode) GenerateV() [][]uint32 {
 	V := make([][]uint32, ec.L)
 	// k := uint32(math.Ceil(math.Log2(float64(max(ec.L,ec.K)))))
@@ -43,6 +44,7 @@ func (ec *EvaluationCode) GenerateV() [][]uint32 {
 	// omega := tdm.NthRootOfUnity(ec.q, k)
 	return V
 }
+*/
 
 func (ec *EvaluationCode) encode(message []uint32) ([]uint32, bool) {
 	l := len(message)
