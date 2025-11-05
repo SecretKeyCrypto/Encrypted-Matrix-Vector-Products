@@ -5,20 +5,20 @@ import (
 	"math/rand"
 )
 
-func RandomizeVector(data []uint32, length uint32) {
-	randomize_vector(data, length)
+func RandomizeVector(data []uint32, M, N uint32, transpose bool) {
+	randomize_vector(data, M, N, transpose)
 }
 
-func RandomizeVectorWithSeed(data []uint32, length uint32, seed int64) {
-	randomize_vector_with_seed(data, length, seed)
+func RandomizeVectorWithSeed(data []uint32, M, N uint32, transpose bool, seed int64) {
+	randomize_vector_with_seed(data, M, N, transpose, seed)
 }
 
-func RandomizeVectorWithModulus(data []uint32, length uint32, modulus uint32) {
-	randomize_vector_with_modulus(data, length, modulus)
+func RandomizeVectorWithModulus(data []uint32, M, N uint32, transpose bool, modulus uint32) {
+	randomize_vector_with_modulus(data, M, N, transpose, modulus)
 }
 
-func RandomizeVectorWithModulusAndSeed(data []uint32, length uint32, modulus uint32, seed int64) {
-	randomize_vector_with_modulus_and_seed(data, length, modulus, seed)
+func RandomizeVectorWithModulusAndSeed(data []uint32, M, N uint32, transpose bool, modulus uint32, seed int64) {
+	randomize_vector_with_modulus_and_seed(data, M, N, transpose, modulus, seed)
 }
 
 // =========== Random Vectors ===========
@@ -136,18 +136,17 @@ func RandomSplitLSNNoiseCoeffF4(s uint32) ([]uint32, []uint32, []uint32, []uint3
 	return bit1Vec, bitPVec, bit1Inv, bitPInv
 }
 
-func RandomPrimeFieldVector(n uint32, p uint32) []uint32 {
-	vector := dataobjects.AlignedMake[uint32](uint64(n))
+func RandomPrimeFieldVector(vector []uint32, p uint32) {
 	if dataobjects.USE_FAST_CODE {
-		randomize_vector_with_modulus(vector, n, p)
+		RandomizeVectorWithModulus(vector, uint32(len(vector)), 1, false, p)
 	} else {
 		for i := range vector {
 			vector[i] = uint32(rand.Intn(int(p))) // Generates non-zero values in F_p
 		}
 	}
-	return vector
 }
 
+// TODO accept array instead of returning it - deferred since this is not used in MVP
 func RandomNoiseVector(n uint32, epsi float32, p uint32) []uint32 {
 	vector := dataobjects.AlignedMake[uint32](uint64(n))
 	for i := range vector {
@@ -158,21 +157,23 @@ func RandomNoiseVector(n uint32, epsi float32, p uint32) []uint32 {
 	return vector
 }
 
-func RandomLPNNoiseVector(n uint32, epsi float64, field dataobjects.Field) []uint32 {
-	vector := dataobjects.AlignedMake[uint32](uint64(n))
-	for i := range vector {
-		if rand.Float64() <= epsi {
-			var val uint32
-			for {
-				val = field.SampleElement()
-				if val != 0 {
-					break
+func RandomLPNNoiseVector(result []uint32, epsi float64, field dataobjects.Field) {
+	if dataobjects.USE_FAST_CODE {
+		lpn_noise_vector(result, 0, uint64(len(result)), epsi, field.Mod())
+	} else {
+		for i := range result {
+			if rand.Float64() <= epsi {
+				var val uint32
+				for {
+					val = SampleElement(field)
+					if val != 0 {
+						break
+					}
 				}
+				result[i] = val
 			}
-			vector[i] = val
 		}
 	}
-	return vector
 }
 
 func IsZeroVector(v []uint32) bool {
@@ -191,7 +192,7 @@ func GeneratePrimeFieldMatrix(rows, cols, p uint32, seed int64) dataobjects.Matr
 	data := dataobjects.AlignedMake[uint32](uint64(dataSize))
 
 	if dataobjects.USE_FAST_CODE {
-		RandomizeVectorWithModulusAndSeed(data, uint32(dataSize), p, seed)
+		RandomizeVectorWithModulusAndSeed(data, uint32(dataSize), 1, false, p, seed)
 	} else {
 		rng := rand.New(rand.NewSource(seed))
 		for i := range data {

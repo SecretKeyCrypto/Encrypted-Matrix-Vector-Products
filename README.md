@@ -6,13 +6,12 @@ Make sure you have the following installed:
 
 - **Go ≥ 1.21**
 - **C++17** compiler (`g++`)
-- **NTL** and **GMP** development libraries
 
 Install on Ubuntu/Debian:
 
 ```
 sudo apt update
-sudo apt install build-essential libntl-dev libgmp-dev
+sudo apt install build-essential
 ```
 
 ---
@@ -41,7 +40,7 @@ Before running tests, set the appropriate environment variables **from the root 
 
 ```
 export CGO_CXXFLAGS="-std=c++17 -I$(pwd)/tdm -I$(pwd)/ecc -I/usr/include"
-export CGO_LDFLAGS="-L$(pwd)/tdm -L$(pwd)/ecc -lNTT -lReedSolomon -lntl -lgmp"
+export CGO_LDFLAGS="-L$(pwd)/tdm -L$(pwd)/ecc -lNTT -lReedSolomon"
 ```
 
 ---
@@ -81,9 +80,9 @@ On macOS, OpenSSL is not provided by default. This project requires **libcrypto*
 ### 🛠 Example full setup on macOS
 
 ```bash
-brew install gmp ntl openssl@3
+brew install openssl@3
 ./run.sh
 export CGO_CFLAGS="-I$(brew --prefix openssl@3)/include -I$(pwd)/tdm -I$(pwd)/ecc"
-export CGO_LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(pwd)/tdm -L$(pwd)/ecc -lNTT -lReedSolomon -lntl -lgmp -lcrypto"
+export CGO_LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(pwd)/tdm -L$(pwd)/ecc -lNTT -lReedSolomon -lcrypto"
 go test -bench=. ./...
 ```

@@ -130,6 +130,7 @@ void BlockMatVecProduct_StraightForward(
 }
 
 // If the matrix are already stored by blocks.
+// FIXME - make fast on GPU
 void BlockMatVecProduct(const uint32_t* __restrict__ mat,    // matrix: size n × m, block-wise, row-major
     const uint32_t* __restrict__ vec,    // vector: length m
     uint32_t*       __restrict__ result, // output: size s × n, row-major blocks
@@ -150,6 +151,7 @@ void BlockMatVecProduct(const uint32_t* __restrict__ mat,    // matrix: size n �
 }
 
 
+// FIXME - make fast on GPU
 // M x v
 void MatVecProduct(const uint32_t* mat, const uint32_t* vec, uint32_t* result, uint32_t n, uint32_t m, uint32_t p)
 {
@@ -165,6 +167,7 @@ void MatVecProduct(const uint32_t* mat, const uint32_t* vec, uint32_t* result, u
     }
 }
 
+// FIXME - make fast on GPU
 void BlockVecMatProduct(const uint32_t* mat, const uint32_t* vec, uint32_t* result, uint32_t n, uint32_t m, uint32_t s, uint32_t p)
 {
     int b = n / s;

@@ -17,8 +17,9 @@ type LinearCodeConfig struct {
 type LinearCode interface {
 	Generate1DDualMatrix(L, K uint32, field dataobjects.Field, seed int64) []uint32
 	Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, seed int64) []uint32
-	EncodeLSN(message []uint32) ([]uint32, bool)
-	EncodeDual(message []uint32) ([]uint32, bool)
+	EncodeLSN(message []uint32) []uint32
+	EncodeDual(message []uint32) []uint32
+	EncodeLength() uint32
 }
 
 func GetLinearCode(config LinearCodeConfig) LinearCode {

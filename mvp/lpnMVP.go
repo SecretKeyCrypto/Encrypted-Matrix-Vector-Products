@@ -6,9 +6,11 @@ import (
 	"RandomLinearCodePIR/linearcode"
 	"RandomLinearCodePIR/tdm"
 	"RandomLinearCodePIR/utils"
+	"context"
 )
 
 type LpnMVP struct {
+	Ctx    context.Context
 	Params LpnParams
 }
 
@@ -58,8 +60,9 @@ func (lpn *LpnMVP) KeyGen(seed int64) SecretKey {
 	params := lpn.Params
 	return SecretKey{
 		LinearCodeKey:   seed,
-		PreLoadedMatrix: linearcode.Generate1DDualMatrix(params.L, params.K, params.Field, seed),
+		PreLoadedMatrix: linearcode.Generate1DDualMatrix(lpn.Ctx, params.L, params.K, params.Field, seed),
 		TDM: &tdm.TDM{
+			Ctx: lpn.Ctx,
 			// Trapdoored matrix would be applied Each Slice with params.M / params.M_1 rows
 			M: params.M / params.M_1,
 			N: params.N,
@@ -83,9 +86,12 @@ func (lpn *LpnMVP) GenerateTDM(sk SecretKey) [][]uint32 {
 }
 
 func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint32) *dataobjects.Matrix {
+	frame := dataobjects.MakeDeferralFrame(lpn.Ctx)
+	defer frame.Close()
+
 	params := lpn.Params
 	rlcMatrix := linearcode.Generate1DRLCMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
-	defer dataobjects.Aligned1DFree(rlcMatrix)
+	frame.Defer(func() { dataobjects.Aligned1DFree(rlcMatrix) })
 
 	// Assume M_1 | M for now
 	rowPerSlice := params.M / params.M_1
@@ -95,16 +101,16 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 
 	// Re-use slot for ECC encoding
 	message := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
-	defer dataobjects.Aligned1DFree(message)
+	frame.Defer(func() { dataobjects.Aligned1DFree(message) })
 
-	generatorMatrix := ecc.GetECCCode(ecc.ECCConfig{
+	generatorMatrix := ecc.GetECCCode(lpn.Ctx, ecc.ECCConfig{
 		Name: params.ECCName,
 		Q:    params.P,
 		N:    params.ECCLength,
 		K:    params.M_1}).GetGeneratorMatrix(params.M_1, params.ECCLength, params.P)
-	defer dataobjects.Aligned1DFree(generatorMatrix)
+	frame.Defer(func() { dataobjects.Aligned1DFree(generatorMatrix) })
 
-	for i := uint32(0); i < rowPerSlice; i++ {
+	for i := range rowPerSlice {
 		for j := uint32(0); j < params.M_1; j++ {
 			// Input matrix with each row length L, block size M_1
 			inputStart := (i*params.M_1 + j) * params.L
@@ -113,7 +119,11 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 			outputStart := j*entryPerSlice + i*params.N
 
 			// Copy the input row into the first L element of the output row
-			copy(encoded[outputStart:outputStart+params.L], input.Data[inputStart:inputStart+params.L])
+			if dataobjects.USE_FAST_CODE {
+				dataobjects.FieldCopyVector(encoded, uint64(outputStart), input.Data, uint64(inputStart), uint64(params.L))
+			} else {
+				copy(encoded[outputStart:outputStart+params.L], input.Data[inputStart:inputStart+params.L])
+			}
 
 			MatVecProduct(rlcMatrix, input.Data[inputStart:inputStart+input.Cols], encoded[outputStart+params.L:outputStart+params.N],
 				params.K, params.L, params.P)
@@ -150,38 +160,61 @@ func (lpn *LpnMVP) Encode(sk SecretKey, input dataobjects.Matrix, masks [][]uint
 }
 
 func (lpn *LpnMVP) Query(sk SecretKey, vec []uint32) (*LpnQuery, *LpnAux) {
+	frame := dataobjects.MakeDeferralFrame(lpn.Ctx)
+	defer frame.Close()
+
 	params := lpn.Params
 
 	PofDual := sk.PreLoadedMatrix
 	if len(PofDual) == 0 {
-		PofDual = linearcode.Generate1DDualMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
+		PofDual = linearcode.Generate1DDualMatrix(lpn.Ctx, params.L, params.K, params.Field, sk.LinearCodeKey)
 	}
 
 	// ECCLength Slice, each with length N
 	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N * params.ECCLength))
 	masks := dataobjects.AlignedMake[uint32](uint64(params.M * params.ECCLength / params.M_1))
 
-	noisyQueryIndicator := make([]bool, params.ECCLength)
-
+	noisyQueryIndicator := dataobjects.AlignedMake[bool](uint64(params.ECCLength))
+	e := dataobjects.AlignedMake[uint32](uint64(params.L))
+	frame.Defer(func() { dataobjects.Aligned1DFree(e) })
+	bmask := sk.TDM.AllocateMaskForEvaluationCircuitPerSlice()
+	frame.Defer(func() { dataobjects.Aligned1DFree(bmask) })
+	bv := sk.TDM.AllocateBlockVectorForEvaluationCircuitPerSlice()
+	frame.Defer(func() { dataobjects.Aligned1DFree(bv) })
+	r := dataobjects.AlignedMake[uint32](uint64(params.K))
 	for t := uint32(0); t < params.ECCLength; t++ {
-		r := params.Field.SampleVector(params.K)
+		utils.SampleVector(params.Field, r, params.K)
 		// e \in Ber(epsi)^L
-		e := utils.RandomLPNNoiseVector(params.L, params.Epsi, params.Field)
+		utils.RandomLPNNoiseVector(e, params.Epsi, params.Field)
 
 		MatVecProduct(PofDual, r, queryVector[t*params.N:], params.L, params.K, params.P)
 
-		if !utils.IsZeroVector(e) {
-			noisyQueryIndicator[t] = true
-			params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), e, 0, uint64(params.L))
+		if dataobjects.USE_FAST_CODE {
+			dataobjects.FieldAddVectorIfNonZero(noisyQueryIndicator, uint64(t), queryVector, uint64(t*params.N), e, 0, uint64(params.L), params.Field.Mod())
+		} else {
+			if !utils.IsZeroVector(e) {
+				noisyQueryIndicator[t] = true
+				params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), e, 0, uint64(params.L))
+			}
 		}
 
-		copy(queryVector[t*params.N+params.L:t*params.N+params.N], r[:params.K])
+		if dataobjects.USE_FAST_CODE {
+			dataobjects.FieldCopyVector(queryVector, uint64(t*params.N+params.L), r, 0, uint64(params.K)) // relies on N = K + L
+		} else {
+			copy(queryVector[t*params.N+params.L:t*params.N+params.N], r[:params.K])
+		}
 
 		params.Field.AddVectors(queryVector, uint64(t*params.N), queryVector, uint64(t*params.N), vec, 0, uint64(params.L))
-		mask := sk.TDM.EvaluationCircuitPerSlice(queryVector[t*params.N:(t+1)*params.N], int64(t))
-		defer dataobjects.Aligned1DFree(mask)
+		params.Field.SetVector(bmask, 0, uint64(len(bmask)), 0)
+		params.Field.SetVector(bv, 0, uint64(len(bv)), 0)
+		mask := sk.TDM.EvaluationCircuitPerSliceInPlace(bmask, bv, queryVector[t*params.N:(t+1)*params.N], int64(t))
 
-		copy(masks[t*params.M/params.M_1:], mask)
+		if dataobjects.USE_FAST_CODE {
+			offset := t * params.M / params.M_1
+			dataobjects.FieldCopyVector(masks, uint64(offset), mask, 0, min(uint64(len(masks))-uint64(offset), uint64(len(mask))))
+		} else {
+			copy(masks[t*params.M/params.M_1:], mask)
+		}
 	}
 
 	return &LpnQuery{
@@ -216,6 +249,9 @@ func (lpn *LpnMVP) Answer(encodedMatrix *dataobjects.Matrix, clientQuery *LpnQue
 }
 
 func (lpn *LpnMVP) Decode(sk SecretKey, response *LpnResponse, aux *LpnAux) []uint32 {
+	frame := dataobjects.MakeDeferralFrame(lpn.Ctx)
+	defer frame.Close()
+
 	params := lpn.Params
 
 	// Unmask
@@ -223,24 +259,44 @@ func (lpn *LpnMVP) Decode(sk SecretKey, response *LpnResponse, aux *LpnAux) []ui
 
 	result := dataobjects.AlignedMake[uint32](uint64(params.M))
 
-	code := dataobjects.AlignedMake[uint32](uint64(params.ECCLength))
-	defer dataobjects.Aligned1DFree(code)
+	var codeLength uint64
+	if dataobjects.USE_FAST_CODE {
+		codeLength = uint64(params.ECCLength) * uint64(response.AnsLen)
+	} else {
+		codeLength = uint64(params.ECCLength)
+	}
+	code := dataobjects.AlignedMake[uint32](codeLength)
+	frame.Defer(func() { dataobjects.Aligned1DFree(code) })
 
-	ecccode := ecc.GetECCCode(ecc.ECCConfig{Name: params.ECCName, Q: params.P, N: params.ECCLength, K: params.M_1})
+	ecccode := ecc.GetECCCode(lpn.Ctx, ecc.ECCConfig{Name: params.ECCName, Q: params.P, N: params.ECCLength, K: params.M_1})
+
+	if dataobjects.USE_FAST_CODE {
+		dataobjects.MatrixTraspose(code, response.Answers, params.ECCLength, response.AnsLen)
+	}
 
 	for i := uint32(0); i < response.AnsLen; i++ {
-		for j := uint32(0); j < params.ECCLength; j++ {
-			code[j] = response.Answers[j*response.AnsLen+i]
+		var codeRow []uint32
+		if dataobjects.USE_FAST_CODE {
+			codeRow = code[i*params.ECCLength : (i+1)*params.ECCLength]
+		} else {
+			for j := uint32(0); j < params.ECCLength; j++ {
+				code[j] = response.Answers[j*response.AnsLen+i]
+			}
+			codeRow = code
 		}
 
-		message, err := ecccode.Decode(code, aux.NoisyQueryIndicator)
-		defer dataobjects.Aligned1DFree(message)
+		message, err := ecccode.Decode(codeRow, aux.NoisyQueryIndicator) // `message` is nil on error or a slice of `code` otherwise
 
+		// FIXME move errors to GPU memory
 		if err != nil {
 			panic(err)
 		}
 
-		copy(result[i*params.M_1:(i+1)*params.M_1], message)
+		if dataobjects.USE_FAST_CODE {
+			dataobjects.FieldCopyVector(result, uint64(i*params.M_1), message, 0, min(uint64(params.M_1), uint64(len(result))-uint64(i*params.M_1), uint64(len(message))))
+		} else {
+			copy(result[i*params.M_1:(i+1)*params.M_1], message)
+		}
 	}
 
 	return result

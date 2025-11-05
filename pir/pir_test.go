@@ -1,6 +1,7 @@
 package pir
 
 import (
+	"RandomLinearCodePIR/dataobjects"
 	"RandomLinearCodePIR/utils"
 	"fmt"
 	"math/rand"
@@ -201,10 +202,15 @@ func BenchmarkDecode(b *testing.B) {
 	var totalDuration time.Duration
 	b.ResetTimer()
 
+	n := uint64(pi.Params.PackedSize * pi.Params.NumberOfBlocks)
+	res_1 := dataobjects.AlignedMake[uint32](n)
+	defer dataobjects.Aligned1DFree(res_1)
+	res_2 := dataobjects.AlignedMake[uint32](n)
+	defer dataobjects.Aligned1DFree(res_2)
 	for i := 0; i < b.N; i++ {
 		index := uint64(rand.Intn(int(row)))
-		res_1 := utils.RandomPrimeFieldVector(pi.Params.PackedSize*pi.Params.NumberOfBlocks, 2^32)
-		res_2 := utils.RandomPrimeFieldVector(pi.Params.PackedSize*pi.Params.NumberOfBlocks, 2^32)
+		utils.RandomPrimeFieldVector(res_1, 2^32)
+		utils.RandomPrimeFieldVector(res_2, 2^32)
 		flip := utils.RandomizeFlipVector(pi.Params.NumberOfBlocks)
 		mask := rand.Uint32()
 

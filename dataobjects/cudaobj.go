@@ -4,7 +4,7 @@
 package dataobjects
 
 /*
-#cgo LDFLAGS: -L/usr/lib/x86_64-linux-gnu -lcudart
+#cgo LDFLAGS: -L/usr/lib/x86_64-linux-gnu -lcudart -lcudadevrt
 #include <cuda_runtime.h>
 #include <stdlib.h>
 

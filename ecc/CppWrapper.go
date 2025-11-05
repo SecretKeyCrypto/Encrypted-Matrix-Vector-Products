@@ -3,7 +3,7 @@ package ecc
 /*
 #cgo CXXFLAGS: -std=c++17 -Ofast -fomit-frame-pointer -march=native -mtune=native -I.
 #cgo CFLAGS: -I.
-#cgo LDFLAGS: -L. -lReedSolomon -L/opt/homebrew/lib -lNTT -lntl -lgmp -lstdc++
+#cgo LDFLAGS: -L. -lReedSolomon -L/opt/homebrew/lib -lNTT -lstdc++
 #include "ReedSolomon.h"
 */
 import "C"

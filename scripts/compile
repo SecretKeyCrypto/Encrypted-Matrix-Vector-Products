@@ -28,27 +28,45 @@ else
     SIMD_FLAGS=""
 fi
 
-CXXFLAGS="$CXXFLAGS -std=c++17 -O3 -march=native $SIMD_FLAGS -I/opt/homebrew/include"
-NVCCFLAGS="$NVCCFLAGS -std=c++17 -O3 -I/opt/homebrew/include"
+if test -z "$EMVP_USE_CUDA"
+then
+  EXTRA_CXX_FLAGS=
+else
+  EXTRA_CXX_FLAGS=-DUSE_FAST_CODE_WITH_CUDA
+fi
 
-$CXX $CXXFLAGS -c dataobjects/fields.cpp -o dataobjects/fields.o -I/opt/homebrew/include
+COMMONFLAGS="-std=c++17 -O3 -I/opt/homebrew/include"
+CXXFLAGS="$CXXFLAGS $COMMONFLAGS -march=native $SIMD_FLAGS $EXTRA_CXX_FLAGS"
+NVCCFLAGS="$NVCCFLAGS $COMMONFLAGS --expt-relaxed-constexpr -rdc=true -lcudart $EXTRA_CXX_FLAGS"
+
+$CXX $CXXFLAGS -c dataobjects/fields.cpp -o dataobjects/fields.o 
+$CXX $CXXFLAGS -c dataobjects/matrices.cpp -o dataobjects/matrices.o 
 if test -z "$EMVP_USE_CUDA"
 then
   ar rcs dataobjects/libdataobjects.a dataobjects/fields.o
 else
-  $NVCC $NVCCFLAGS -c dataobjects/cudafields.cu -o dataobjects/cudafields.o -I/opt/homebrew/include
-  ar rcs dataobjects/libdataobjects.a dataobjects/fields.o dataobjects/cudafields.o
+  $NVCC $NVCCFLAGS -c dataobjects/cudafields.cu -o dataobjects/cudafields.o 
+  $NVCC $NVCCFLAGS -c dataobjects/cudamatrices.cu -o dataobjects/cudamatrices.o 
+  $NVCC $NVCCFLAGS -c dataobjects/cudacontext.cu -o dataobjects/cudacontext.o 
+  ar rcs dataobjects/libdataobjects.a dataobjects/fields.o dataobjects/cudafields.o dataobjects/cudacontext.o
 fi
 
-$CXX $CXXFLAGS -c tdm/NTT.cpp -o tdm/NTT.o -I/opt/homebrew/include
+$CXX $CXXFLAGS -c tdm/NTT.cpp -o tdm/NTT.o 
 ar rcs tdm/libNTT.a tdm/NTT.o
 
-$CXX $CXXFLAGS -c mvp/mvp.cpp -o mvp/mvp.o -I/opt/homebrew/include
-$CXX $CXXFLAGS -c mvp/matrixShapeTransform.cpp -o mvp/matrixShapeTransform.o -I/opt/homebrew/include
+$CXX $CXXFLAGS -c mvp/mvp.cpp -o mvp/mvp.o 
+$CXX $CXXFLAGS -c mvp/matrixShapeTransform.cpp -o mvp/matrixShapeTransform.o 
 ar rcs mvp/libMVP.a mvp/mvp.o mvp/matrixShapeTransform.o
 
-$CXX $CXXFLAGS -c ecc/ReedSolomon.cpp -o ecc/ReedSolomon.o -I/opt/homebrew/include
+$CXX $CXXFLAGS -c ecc/ReedSolomon.cpp -o ecc/ReedSolomon.o 
 ar rcs ecc/libReedSolomon.a ecc/ReedSolomon.o
 
-$CXX $CXXFLAGS -c utils/rnd_api.cpp -o utils/rnd_api.o -I/opt/homebrew/include
-ar rcs utils/libutils.a utils/rnd_api.o
+$CXX $CXXFLAGS -c utils/rnd_api.cpp -o utils/rnd_api.o 
+if test -z "$EMVP_USE_CUDA"
+then
+  $CXX $CXXFLAGS -c utils/plainrnd.cpp -o utils/plainrnd.o 
+  ar rcs utils/libutils.a utils/rnd_api.o utils/plainrnd.o
+else
+  $NVCC $NVCCFLAGS -c utils/cudarnd.cu -o utils/cudarnd.o 
+  ar rcs utils/libutils.a utils/rnd_api.o utils/cudarnd.o
+fi

@@ -1,5 +1,7 @@
 package ecc
 
+import "context"
+
 const (
 	ReedSolomon = "ReedSolomon"
 )
@@ -16,10 +18,10 @@ type ErasureCorrectionCode interface {
 	Decode(code []uint32, noisyIndicator []bool) ([]uint32, error)
 }
 
-func GetECCCode(config ECCConfig) ErasureCorrectionCode {
+func GetECCCode(ctx context.Context, config ECCConfig) ErasureCorrectionCode {
 	switch config.Name {
 	case ReedSolomon:
-		return NewReedSolomonCode(config.K, config.N, config.Q)
+		return NewReedSolomonCode(ctx, config.K, config.N, config.Q)
 	default:
 		panic("Unsupported ECC code: " + config.Name)
 	}

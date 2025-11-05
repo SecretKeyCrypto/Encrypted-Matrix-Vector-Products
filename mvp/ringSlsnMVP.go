@@ -3,6 +3,7 @@ package mvp
 import (
 	"RandomLinearCodePIR/dataobjects"
 	"RandomLinearCodePIR/linearcode"
+	"RandomLinearCodePIR/utils"
 	"time"
 )
 
@@ -26,17 +27,27 @@ func (rmvp *RingSlsnMVP) GenerateTDM(sk SecretKey) []uint32 {
 }
 
 func (rmvp *RingSlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint32) *dataobjects.Matrix {
+	frame := dataobjects.MakeDeferralFrame(rmvp.SlsnMVP.Ctx)
+	defer frame.Close()
+
 	params := rmvp.SlsnMVP.Params
 	encoded := dataobjects.AlignedMake[uint32](uint64(input.Rows * params.N))
-	defer dataobjects.Aligned1DFree(encoded)
+	frame.Defer(func() { dataobjects.Aligned1DFree(encoded) })
+	encodedDualBuffer := dataobjects.AlignedMake[uint32](uint64(rmvp.LinearCodeEncoder.EncodeLength()))
+	frame.Defer(func() { dataobjects.Aligned1DFree(encodedDualBuffer) })
 
 	for i := uint32(0); i < input.Rows; i++ {
-		copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
-		encodedDual, encodedDualIsNew := rmvp.LinearCodeEncoder.EncodeDual(input.Data[i*params.L : (i+1)*params.L])
-		if encodedDualIsNew {
-			defer dataobjects.Aligned1DFree(encodedDual)
+		if dataobjects.USE_FAST_CODE {
+			dataobjects.FieldCopyVector(encoded, uint64(i*params.N), input.Data, uint64(i*params.L), uint64(params.L))
+		} else {
+			copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
 		}
-		copy(encoded[i*params.N+params.L:(i+1)*params.N], encodedDual)
+		encodedDual := rmvp.LinearCodeEncoder.EncodeDual(input.Data[i*params.L : (i+1)*params.L]) // relies on `encodedDual` sharing memory with `input`
+		if dataobjects.USE_FAST_CODE {
+			dataobjects.FieldCopyVector(encoded, uint64(i*params.N+params.L), encodedDual, 0, min(uint64(len(encodedDual)), uint64(params.K))) // relies on K + L = N
+		} else {
+			copy(encoded[i*params.N+params.L:(i+1)*params.N], encodedDual)
+		}
 	}
 
 	params.Field.AddVectors(encoded, 0, encoded, 0, mask, 0, uint64(len(encoded)))
@@ -53,20 +64,29 @@ func (rmvp *RingSlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []u
 }
 
 func (rmvp *RingSlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
+	frame := dataobjects.MakeDeferralFrame(rmvp.SlsnMVP.Ctx)
+	defer frame.Close()
+
 	params := rmvp.SlsnMVP.Params
 
-	nullspaceCoeff := params.Field.SampleVector(params.K)
-	defer dataobjects.Aligned1DFree(nullspaceCoeff)
+	nullspaceCoeff := dataobjects.AlignedMake[uint32](uint64(rmvp.LinearCodeEncoder.EncodeLength()))
+	utils.SampleVector(params.Field, nullspaceCoeff, params.K)
+	frame.Defer(func() { dataobjects.Aligned1DFree(nullspaceCoeff) })
 
 	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N))
 
-	copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
-
-	encodedNullspaceCoeff, encodedNullspaceCoeffIsNew := rmvp.LinearCodeEncoder.EncodeLSN(nullspaceCoeff)
-	if encodedNullspaceCoeffIsNew {
-		defer dataobjects.Aligned1DFree(encodedNullspaceCoeff)
+	if dataobjects.USE_FAST_CODE {
+		dataobjects.FieldCopyVector(queryVector, uint64(params.L), nullspaceCoeff, 0, uint64(params.K)) // relies on K + L = N
+	} else {
+		copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
 	}
-	copy(queryVector[:params.L], encodedNullspaceCoeff)
+
+	encodedNullspaceCoeff := rmvp.LinearCodeEncoder.EncodeLSN(nullspaceCoeff)
+	if dataobjects.USE_FAST_CODE {
+		dataobjects.FieldCopyVector(queryVector, 0, encodedNullspaceCoeff, 0, min(uint64(params.L), uint64(len(encodedNullspaceCoeff))))
+	} else {
+		copy(queryVector[:params.L], encodedNullspaceCoeff)
+	}
 
 	// Add Vector v to c
 	params.Field.AddVectors(queryVector, 0, queryVector, 0, vec, 0, uint64(params.L))
@@ -78,7 +98,8 @@ func (rmvp *RingSlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux
 	dur := time.Since(start)
 
 	// Generate Non-zero coefficient
-	coeff := params.Field.SampleInvertibleVec(params.S)
+	coeff := dataobjects.AlignedMake[uint32](uint64(params.S))
+	utils.SampleInvertibleVec(params.Field, coeff, params.S)
 
 	for i := uint32(0); i < params.S; i++ {
 		params.Field.MulVector(queryVector, uint64(i*params.B), queryVector, uint64(i*params.B), coeff[i], uint64(params.B))

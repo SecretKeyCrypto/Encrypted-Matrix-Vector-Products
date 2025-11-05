@@ -1,9 +1,5 @@
 package dataobjects
 
-import (
-	"math/rand"
-)
-
 type Field interface {
 	Add(a, b uint32) uint32
 	Mul(a, b uint32) uint32
@@ -11,43 +7,40 @@ type Field interface {
 	Neg(a uint32) uint32
 	Inv(a uint32) uint32
 	Mod() uint32
+	SetVector(r []uint32, ro uint64, length uint64, v uint32)
 	AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
 	MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64)
 	SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
 	NegVector(r []uint32, ro uint64, length uint64)
 	GetChar() uint32
-	SampleElementWithSeed(rng *rand.Rand) uint32
-	SampleElement() uint32
-	SampleInvertibleVec(n uint32) []uint32
 	InvertVector(vec []uint32) []uint32
-	SampleVector(n uint32) []uint32
 }
 
 type PrimeField struct {
 	p uint32
 }
 
-func NewPrimeField(p uint32) *PrimeField {
-	return &PrimeField{p: p}
+func NewPrimeField(p uint32) PrimeField {
+	return PrimeField{p: p}
 }
 
-func (f *PrimeField) Add(a, b uint32) uint32 {
+func (f PrimeField) Add(a, b uint32) uint32 {
 	return uint32((uint64(a) + uint64(b)) % uint64(f.p))
 }
 
-func (f *PrimeField) Mul(a, b uint32) uint32 {
+func (f PrimeField) Mul(a, b uint32) uint32 {
 	return uint32((uint64(a) * uint64(b)) % uint64(f.p))
 }
 
-func (f *PrimeField) Sub(a, b uint32) uint32 {
+func (f PrimeField) Sub(a, b uint32) uint32 {
 	return uint32((uint64(a) + uint64(f.p) - uint64(b)) % uint64(f.p))
 }
 
-func (f *PrimeField) Neg(a uint32) uint32 {
+func (f PrimeField) Neg(a uint32) uint32 {
 	return (f.p - a) % f.p
 }
 
-func (f *PrimeField) Inv(a uint32) uint32 {
+func (f PrimeField) Inv(a uint32) uint32 {
 	var t, newT int64 = 0, 1
 	var r, newR int64 = int64(f.p), int64(a)
 
@@ -68,17 +61,29 @@ func (f *PrimeField) Inv(a uint32) uint32 {
 	return uint32(t)
 }
 
-func (f *PrimeField) Mod() uint32 {
+func (f PrimeField) Mod() uint32 {
 	return f.p
 }
 
-func (f *PrimeField) GetChar() uint32 {
+func (f PrimeField) GetChar() uint32 {
 	return f.p
 }
 
-func (f *PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
+func (f PrimeField) SetVector(r []uint32, ro uint64, length uint64, v uint32) {
+	if USE_FAST_CODE {
+		FieldSetVector(r, ro, length, v)
+	} else {
+		for i := uint64(0); i < length; i++ {
+			r[ro+i] = v
+		}
+	}
+}
+
+func (f PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
 	if USE_FAST_CODE {
 		FieldAddVectors(r, ro, a, ao, b, bo, length, f.p)
+		// r := FieldAddVectors(r, ro, a, ao, b, bo, length, f.p)
+		// fmt.Printf("************ %d\n", r)
 	} else {
 		for i := uint64(0); i < length; i++ {
 			r[ro+i] = uint32(uint64(a[ao+i]) + uint64(b[bo+i])%uint64(f.p))
@@ -86,7 +91,7 @@ func (f *PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b 
 	}
 }
 
-func (f *PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64) {
+func (f PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64) {
 	if USE_FAST_CODE {
 		FieldMulVector(r, ro, a, ao, b, length, f.p)
 	} else {
@@ -96,7 +101,7 @@ func (f *PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b u
 	}
 }
 
-func (f *PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
+func (f PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
 	if USE_FAST_CODE {
 		FieldSubVectors(r, ro, a, ao, b, bo, length, f.p)
 	} else {
@@ -106,7 +111,7 @@ func (f *PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b 
 	}
 }
 
-func (f *PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
+func (f PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
 	if USE_FAST_CODE {
 		FieldNegVector(r, ro, length, f.p)
 	} else {
@@ -116,33 +121,7 @@ func (f *PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
 	}
 }
 
-func (f *PrimeField) SampleElement() uint32 {
-	return uint32(rand.Intn(int(f.p)))
-}
-
-func (f *PrimeField) SampleElementWithSeed(rng *rand.Rand) uint32 {
-	return uint32(rng.Intn(int(f.p)))
-}
-
-func (f *PrimeField) SampleInvertibleVec(n uint32) []uint32 {
-	vec := AlignedMake[uint32](uint64(n))
-
-	for i := range vec {
-		vec[i] = uint32(rand.Intn(int(f.p)-1) + 1)
-	}
-	return vec
-}
-
-func (f *PrimeField) SampleVector(n uint32) []uint32 {
-	vec := AlignedMake[uint32](uint64(n))
-
-	for i := range vec {
-		vec[i] = uint32(rand.Intn(int(f.p)))
-	}
-	return vec
-}
-
-func (f *PrimeField) InvertVector(vec []uint32) []uint32 {
+func (f PrimeField) InvertVector(vec []uint32) []uint32 {
 	inv := AlignedMake[uint32](uint64(len(vec)))
 
 	for i := range vec {

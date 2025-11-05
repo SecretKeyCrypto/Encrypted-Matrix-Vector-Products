@@ -1,43 +1,51 @@
 #include "rnd_api.h"
-#include "aes_rnd.h"
-#include "../dataobjects/mod_simd.h"
 
-#include <string.h>
+#ifdef USE_FAST_CODE_WITH_CUDA
 
-static thread_local AES_Random aesrnd;
+#include "cudarnd.h"
 
-void randomize_vector(uint32_t* data, uint32_t length) {
-    if (!data) return;
-
-    uint32_t bytelength = length * sizeof(uint32_t);
-    uint8_t* bytedata = (uint8_t*)data;
-    uint32_t i = 0;
-
-    for (; i + 16 <= bytelength; i += 16, bytedata += 16) {
-        aesrnd.random_bytes(bytedata);
-    }
-
-    if (i < bytelength) {
-        uint8_t bytes[16];
-        aesrnd.random_bytes(bytes);
-        memcpy(bytedata, bytes, bytelength - i);
-    }
+void randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose) {
+    cuda_randomize_vector(data, M, N, transpose);
 }
 
-void randomize_vector_with_seed(uint32_t* data, uint32_t length, int64_t seed) {
-    uint8_t seed8_16[16];
-    int64_t* seed2_64 = (int64_t*)seed8_16;
-    seed2_64[0] = seed2_64[1] = seed;
-    aesrnd.reseed(seed8_16);
-    randomize_vector(data, length);
+void randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed) {
+    cuda_randomize_vector_with_seed(data, M, N, transpose, seed);
 }
 
-void randomize_vector_with_modulus(uint32_t* data, uint32_t length, uint32_t modulus) {
-    randomize_vector(data, length);
-    vector_mod_op(data, data, modulus, length);
+void randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus) {
+    cuda_randomize_vector_with_modulus(data, M, N, transpose, modulus);
 }
 
-void randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t length, uint32_t modulus, int64_t seed) {
-    randomize_vector_with_seed(data, length, seed);
-    vector_mod_op(data, data, modulus, length);
+void randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed) {
+    cuda_randomize_vector_with_modulus_and_seed(data, M, N, transpose, modulus, seed);
 }
+
+void lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus) {
+    cuda_lpn_noise_vector(data, length, epsi, modulus);
+}
+
+#else
+
+#include "plainrnd.h"
+
+void randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose) {
+    plain_randomize_vector(data, M, N, transpose);
+}
+
+void randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed) {
+    plain_randomize_vector_with_seed(data, M, N, transpose, seed);
+}
+
+void randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus) {
+    plain_randomize_vector_with_modulus(data, M, N, transpose, modulus);
+}
+
+void randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed) {
+    plain_randomize_vector_with_modulus_and_seed(data, M, N, transpose, modulus, seed);
+}
+
+void lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus) {
+    plain_lpn_noise_vector(data, length, epsi, modulus);
+}
+
+#endif

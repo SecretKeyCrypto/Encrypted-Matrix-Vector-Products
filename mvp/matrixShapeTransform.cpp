@@ -4,6 +4,7 @@
 #include "matrixShapeTransform.h"
 #include <cassert>
 
+// FIXME - make fast on GPU
 void TransformRowMajorToBlockRowMajor(
     const uint32_t* mat,        // input: size n × m, row-major
     uint32_t* matBlocked,       // output: size n × m, block-row-major
