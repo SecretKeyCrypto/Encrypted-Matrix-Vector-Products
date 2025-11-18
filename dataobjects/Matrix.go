@@ -11,3 +11,13 @@ func (matrix *Matrix) Free() {
 		matrix.Data = Aligned1DFree(matrix.Data)
 	}
 }
+
+func (matrix *Matrix) DoFree(doctx *DoContext) bool {
+	if matrix.Data != nil {
+		if !DoAligned1DFree(doctx, matrix.Data) {
+			return false
+		}
+		matrix.Data = nil
+	}
+	return true
+}

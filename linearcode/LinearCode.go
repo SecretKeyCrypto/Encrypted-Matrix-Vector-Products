@@ -1,6 +1,9 @@
 package linearcode
 
-import "RandomLinearCodePIR/dataobjects"
+import (
+	"RandomLinearCodePIR/dataobjects"
+	"context"
+)
 
 const (
 	RandomLinearCode = "Random"
@@ -17,15 +20,15 @@ type LinearCodeConfig struct {
 type LinearCode interface {
 	Generate1DDualMatrix(L, K uint32, field dataobjects.Field, seed int64) []uint32
 	Generate1DRLCMatrix(L, K uint32, p dataobjects.Field, seed int64) []uint32
-	EncodeLSN(message []uint32) []uint32
-	EncodeDual(message []uint32) []uint32
+	EncodeLSN(message []uint32, mo, stride, steps uint32)
+	EncodeDual(message []uint32, mo, stride, steps uint32)
 	EncodeLength() uint32
 }
 
-func GetLinearCode(config LinearCodeConfig) LinearCode {
+func GetLinearCode(ctx context.Context, config LinearCodeConfig) LinearCode {
 	switch config.Name {
 	case Vandermonde:
-		return NewEvaluationCode(config.K, config.L, config.Field)
+		return NewEvaluationCode(ctx, config.K, config.L, config.Field)
 	default:
 		panic("Unsupported Linear Code: " + config.Name)
 	}

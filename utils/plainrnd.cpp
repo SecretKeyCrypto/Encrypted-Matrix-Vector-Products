@@ -1,62 +1,73 @@
 #include "plainrnd.h"
 
-#ifdef USE_FAST_CODE_WITH_CUDA
+#include "plainrnd.h"
+#include "aes_rnd.h"
+#include "../dataobjects/fields.h"
+#include "../dataobjects/mod_simd.h"
 
-#include "fields.h"
-#include "cudafields.h"
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int FieldLPNNoiseVector(
-    uint32_t* r, uint64_t ro,
-    uint64_t length, double epsi, uint32_t p
-) {
-    CudaLPNNoiseVector(r + ro, length, epsi, p);
-    return 2;
-}
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#else
-
-#include "aes_rnd.h"
-#include "../dataobjects/mod_simd.h"
-
-#include <string.h>
-
 static thread_local AES_Random aesrnd;
 
-void plain_randomize_vector_1d(uint32_t* data, uint64_t length) {
-    if (!data) return;
+bool plain_randomize_vector_1d(uint32_t* data, uint64_t length, bool circulant) {
+    if (!data || length == 0) return true;
 
-    uint64_t bytelength = length * sizeof(uint32_t);
-    uint8_t* bytedata = (uint8_t*)data;
-    uint32_t i = 0;
+    if (!circulant) {
+        // --- original fast path ---
+        uint64_t bytelength = length * sizeof(uint32_t);
+        uint8_t* bytedata = (uint8_t*)data;
+        uint64_t i = 0;
 
-    for (; i + 16 <= bytelength; i += 16, bytedata += 16) {
-        aesrnd.random_bytes(bytedata);
+        for (; i + 16 <= bytelength; i += 16, bytedata += 16) {
+            aesrnd.random_bytes(bytedata);
+        }
+
+        if (i < bytelength) {
+            uint8_t bytes[16];
+            aesrnd.random_bytes(bytes);
+            memcpy(bytedata, bytes, bytelength - i);
+        }
+        return true;
     }
 
-    if (i < bytelength) {
-        uint8_t bytes[16];
-        aesrnd.random_bytes(bytes);
-        memcpy(bytedata, bytes, bytelength - i);
+    // --- circulant path ---
+    const uint32_t elemsPerChunk = 4;
+    union Chunk {
+        uint8_t bytes[elemsPerChunk * sizeof(uint32_t)];
+        uint32_t vals[elemsPerChunk];
+    } chunk;
+
+    uint64_t produced = 0;
+    while (produced < length) {
+        aesrnd.random_bytes(chunk.bytes);
+
+        uint32_t count = (uint32_t)((length - produced) < elemsPerChunk ? (length - produced) : elemsPerChunk);
+
+        for (uint32_t k = 0; k < count; ++k) {
+            uint64_t c = produced + k;
+            uint64_t idx = (c == 0 ? 0 : (length - c));
+            data[idx] = chunk.vals[k];
+        }
+
+        produced += count;
     }
+    return true;
 }
 
-void plain_randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose) {
-    if (!data) return;
+bool plain_randomize_vector(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant) {
+    if (!data) return true;
     if (M == 1 || N == 1) {
-        plain_randomize_vector_1d(data, (uint64_t)M*N);
-        return;
+        bool circulant_1d = (M == 1) ? circulant : false;
+        plain_randomize_vector_1d(data, (uint64_t)M * (uint64_t)N, circulant_1d);
+        return true;
     }
 
     const uint64_t total_elems = (uint64_t)M * (uint64_t)N;
-    if (total_elems == 0) return;
+    if (total_elems == 0) return true;
 
     const uint64_t elemsPerChunk = 4;
     union Chunk {
@@ -76,13 +87,11 @@ void plain_randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpo
                 uint64_t linear = start_linear + (uint64_t)produced;
                 if (linear >= total_elems) break;
 
+                uint32_t cc = circulant ? (c == 0 ? 0 : N - c) : c;
+                uint64_t idx = transpose ? (uint64_t)cc * M + r : (uint64_t)r * N + cc;
+                if (idx >= total_elems) break;
                 uint32_t v = chunk.vals[produced];
-                if (!transpose) {
-                    data[linear] = v;
-                } else {
-                    uint64_t t_idx = (uint64_t)c * (uint64_t)M + (uint64_t)r;
-                    data[t_idx] = v;
-                }
+                data[idx] = v;
                 ++produced;
             }
         }
@@ -94,30 +103,36 @@ void plain_randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpo
             ++row;
         }
     }
+    return true;
 }
 
-void plain_randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed) {
+bool plain_randomize_vector_with_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, int64_t seed, int64_t offset) {
     uint8_t seed8_16[16];
     int64_t* seed2_64 = (int64_t*)seed8_16;
     seed2_64[0] = seed2_64[1] = seed;
     aesrnd.reseed(seed8_16);
-    plain_randomize_vector(data, M, N, transpose);
+    if (offset >= 0) aesrnd.seek(offset);
+    plain_randomize_vector(ctx, data, M, N, transpose, circulant);
+    return true;
 }
 
-void plain_randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus) {
-    plain_randomize_vector(data, M, N, transpose);
+bool plain_randomize_vector_with_modulus(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus) {
+    plain_randomize_vector(ctx, data, M, N, transpose, circulant);
     vector_mod_op(data, data, modulus, (size_t)M * N);
+    return true;
 }
 
-void plain_randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed) {
-    plain_randomize_vector_with_seed(data, M, N, transpose, seed);
+bool plain_randomize_vector_with_modulus_and_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus, int64_t seed, int64_t offset) {
+    plain_randomize_vector_with_seed(ctx, data, M, N, transpose, circulant, seed, offset);
     vector_mod_op(data, data, modulus, (size_t)M * N);
+    return true;
 }
 
-inline void NoSimdLPNNoiseVector(uint32_t* r, uint64_t length, double epsi, uint32_t p) {
+inline void NoSimdLPNNoiseVector(DoContext* ctx, uint32_t* r, uint64_t length, double epsi, uint32_t p, int64_t seed, int64_t offset) {
     uint32_t pmask = bitmask_for(p);
     AES_Random rnd;
-    rnd.reseed();
+    rnd.reseed(seed);
+    rnd.seek(offset);
     const int bits = 53;
     const uint64_t bits_power = 1ULL << bits;
     uint64_t u64a[2];
@@ -142,8 +157,42 @@ inline void NoSimdLPNNoiseVector(uint32_t* r, uint64_t length, double epsi, uint
     }
 }
 
-void plain_lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus) {
-    NoSimdLPNNoiseVector(data, length, epsi, modulus);
+bool plain_lpn_noise_vector(DoContext* ctx, uint32_t* r, uint64_t ro, uint64_t length, double epsi, uint32_t modulus, int64_t seed, int64_t offset) {
+    NoSimdLPNNoiseVector(ctx, r + ro, length, epsi, modulus, seed, offset);
+    return true;
 }
 
-#endif /* USE_FAST_CODE_WITH_CUDA */
+bool plain_random_permutation(DoContext* ctx, uint32_t* perm, uint32_t n, int64_t seed, int64_t offset) {
+    FieldRangeVector(ctx, perm, 0, 0, n);
+
+    // Seed and shuffle
+    uint8_t seed8_16[16];
+    int64_t* seed2_64 = (int64_t*)seed8_16;
+    seed2_64[0] = seed2_64[1] = seed;
+    aesrnd.reseed(seed8_16);
+    if (offset >= 0) aesrnd.seek(offset);
+
+    uint8_t bytes[16 + 4];
+    int width = n >= (1 << 16) ? 4 : n >= (1 << 8) ? 2 : 1;
+    int count = n >= (1 << 16) ? 4 : n >= (1 << 8) ? 8 : 16;
+    uint32_t mask = (1 << width) - 1;
+    uint32_t b = 0;
+    for (uint32_t i = n - 1; i > 0; --i) {
+        if (b == 0) {
+            aesrnd.random_bytes(bytes);
+        }
+        uint32_t j = (*(reinterpret_cast<uint32_t*>(bytes + b)) & mask) % (i + 1);
+        uint32_t temp = perm[i];
+        perm[i] = perm[j];
+        perm[j] = temp;
+        b += width;
+        if (b == count) {
+            b = 0;
+        }
+    }
+    return true;
+}
+
+#ifdef __cplusplus
+}
+#endif

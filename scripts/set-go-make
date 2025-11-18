@@ -1,1 +1,2 @@
 export CGO_FLAGS=-c
+export EMVP_RUN_SINGLE=1

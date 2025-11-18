@@ -1,6 +1,7 @@
 package dataobjects
 
 import "context"
+import "C"
 
 type DeferralFrame struct {
 	stack []func()
@@ -42,15 +43,23 @@ func (s *DeferralStack) Close() {
 	}
 }
 
-type DeferralStackKey struct{}
+type DeferralContext struct {
+	ctx   *DoContext
+	stack DeferralStack
+}
 
-var deferralStackKey = DeferralStackKey{}
+type DeferralContextKey struct{}
+
+var deferralContextKey = DeferralContextKey{}
 
 func MakeDeferralContext(parent context.Context) context.Context {
-	deferralStack := &DeferralStack{
-		stack: []DeferralFrame{},
+	deferralContext := &DeferralContext{
+		ctx: NewDoContext(),
+		stack: DeferralStack{
+			stack: []DeferralFrame{},
+		},
 	}
-	return context.WithValue(parent, deferralStackKey, deferralStack)
+	return context.WithValue(parent, deferralContextKey, deferralContext)
 }
 
 func MakeDeferralContextDefault() context.Context {
@@ -59,12 +68,21 @@ func MakeDeferralContextDefault() context.Context {
 
 func CloseDeferralContext(ctx context.Context) {
 	GetDeferralStack(ctx).Close()
+	FreeDoContext(GetDeferralDoContext(ctx))
+}
+
+func GetDeferralDoContext(ctx context.Context) *DoContext {
+	val := ctx.Value(deferralContextKey)
+	if ctx, ok := val.(*DeferralContext); ok {
+		return ctx.ctx
+	}
+	return nil
 }
 
 func GetDeferralStack(ctx context.Context) *DeferralStack {
-	val := ctx.Value(deferralStackKey)
-	if stack, ok := val.(*DeferralStack); ok {
-		return stack
+	val := ctx.Value(deferralContextKey)
+	if ctx, ok := val.(*DeferralContext); ok {
+		return &ctx.stack
 	}
 	return nil
 }

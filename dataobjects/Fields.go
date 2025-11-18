@@ -9,19 +9,23 @@ type Field interface {
 	Mod() uint32
 	SetVector(r []uint32, ro uint64, length uint64, v uint32)
 	AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
+	AddVectorsExt(r []uint32, ro, rs uint64, a []uint32, ao, as uint64, b []uint32, bo, bs uint64, length, steps uint64)
 	MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64)
+	MulVectorsExt(r []uint32, ro, rs uint64, a []uint32, ao, as uint64, b []uint32, bo, bs uint64, length, steps uint64)
 	SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64)
 	NegVector(r []uint32, ro uint64, length uint64)
+	NegVectorExt(r []uint32, ro uint64, length, stride, steps uint64)
 	GetChar() uint32
-	InvertVector(vec []uint32) []uint32
+	InvertVector(vec, inv []uint32)
 }
 
 type PrimeField struct {
-	p uint32
+	doctx *DoContext
+	p     uint32
 }
 
-func NewPrimeField(p uint32) PrimeField {
-	return PrimeField{p: p}
+func NewPrimeField(doctx *DoContext, p uint32) PrimeField {
+	return PrimeField{doctx: doctx, p: p}
 }
 
 func (f PrimeField) Add(a, b uint32) uint32 {
@@ -71,7 +75,7 @@ func (f PrimeField) GetChar() uint32 {
 
 func (f PrimeField) SetVector(r []uint32, ro uint64, length uint64, v uint32) {
 	if USE_FAST_CODE {
-		FieldSetVector(r, ro, length, v)
+		FieldSetVector(f.doctx, r, ro, length, v)
 	} else {
 		for i := uint64(0); i < length; i++ {
 			r[ro+i] = v
@@ -81,8 +85,8 @@ func (f PrimeField) SetVector(r []uint32, ro uint64, length uint64, v uint32) {
 
 func (f PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
 	if USE_FAST_CODE {
-		FieldAddVectors(r, ro, a, ao, b, bo, length, f.p)
-		// r := FieldAddVectors(r, ro, a, ao, b, bo, length, f.p)
+		FieldAddVectors(f.doctx, r, ro, a, ao, b, bo, length, f.p)
+		// r := FieldAddVectors(f.doctx, r, ro, a, ao, b, bo, length, f.p)
 		// fmt.Printf("************ %d\n", r)
 	} else {
 		for i := uint64(0); i < length; i++ {
@@ -91,9 +95,21 @@ func (f PrimeField) AddVectors(r []uint32, ro uint64, a []uint32, ao uint64, b [
 	}
 }
 
+func (f PrimeField) AddVectorsExt(r []uint32, ro, rs uint64, a []uint32, ao, as uint64, b []uint32, bo, bs uint64, length, steps uint64) {
+	if USE_FAST_CODE {
+		FieldAddVectorsExt(f.doctx, r, ro, rs, a, ao, as, b, bo, bs, length, steps, f.p)
+	} else {
+		for s := uint64(0); s < steps; s++ {
+			for i := uint64(0); i < length; i++ {
+				r[ro+s*rs+i] = uint32(uint64(a[ao+s*as+i]) + uint64(b[bo+s*bs+i])%uint64(f.p))
+			}
+		}
+	}
+}
+
 func (f PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b uint32, length uint64) {
 	if USE_FAST_CODE {
-		FieldMulVector(r, ro, a, ao, b, length, f.p)
+		FieldMulVector(f.doctx, r, ro, a, ao, b, length, f.p)
 	} else {
 		for i := uint64(0); i < length; i++ {
 			r[ro+i] = uint32((uint64(a[ao+i]) * uint64(b)) % uint64(f.p))
@@ -101,9 +117,21 @@ func (f PrimeField) MulVector(r []uint32, ro uint64, a []uint32, ao uint64, b ui
 	}
 }
 
+func (f PrimeField) MulVectorsExt(r []uint32, ro, rs uint64, a []uint32, ao, as uint64, b []uint32, bo, bs uint64, length, steps uint64) {
+	if USE_FAST_CODE {
+		FieldMulVectorsExt(f.doctx, r, ro, rs, a, ao, as, b, bo, bs, length, steps, f.p)
+	} else {
+		for s := uint64(0); s < steps; s++ {
+			for i := uint64(0); i < length; i++ {
+				r[ro+s*rs+i] = uint32(uint64(a[ao+s*as+i]) * uint64(b[bo+s*bs+i]) % uint64(f.p))
+			}
+		}
+	}
+}
+
 func (f PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b []uint32, bo uint64, length uint64) {
 	if USE_FAST_CODE {
-		FieldSubVectors(r, ro, a, ao, b, bo, length, f.p)
+		FieldSubVectors(f.doctx, r, ro, a, ao, b, bo, length, f.p)
 	} else {
 		for i := uint64(0); i < length; i++ {
 			r[ro+i] = uint32((uint64(a[ao+i]) + uint64(f.p) - uint64(b[bo+i])) % uint64(f.p))
@@ -113,7 +141,7 @@ func (f PrimeField) SubVectors(r []uint32, ro uint64, a []uint32, ao uint64, b [
 
 func (f PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
 	if USE_FAST_CODE {
-		FieldNegVector(r, ro, length, f.p)
+		FieldNegVector(f.doctx, r, ro, length, f.p)
 	} else {
 		for i := uint64(0); i < length; i++ {
 			r[ro+i] = (f.p - r[ro+i]) % f.p
@@ -121,14 +149,24 @@ func (f PrimeField) NegVector(r []uint32, ro uint64, length uint64) {
 	}
 }
 
-func (f PrimeField) InvertVector(vec []uint32) []uint32 {
-	inv := AlignedMake[uint32](uint64(len(vec)))
-
-	for i := range vec {
-		inv[i] = f.Inv(vec[i])
+func (f PrimeField) NegVectorExt(r []uint32, ro uint64, length, stride, steps uint64) {
+	if USE_FAST_CODE {
+		FieldNegVectorExt(f.doctx, r, ro, length, stride, steps, f.p)
+	} else {
+		for i := uint64(0); i < steps; i++ {
+			f.NegVector(r, ro+i*stride, length)
+		}
 	}
+}
 
-	return inv
+func (f PrimeField) InvertVector(vec, inv []uint32) {
+	if USE_FAST_CODE {
+		FieldInvVector(f.doctx, inv, 0, vec, 0, uint64(len(vec)), f.p)
+	} else {
+		for i := range vec {
+			inv[i] = f.Inv(vec[i])
+		}
+	}
 }
 
 type RingZ2k struct {

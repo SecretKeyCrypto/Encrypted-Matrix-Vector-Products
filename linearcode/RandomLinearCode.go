@@ -9,10 +9,11 @@ import (
 
 // Return -P of C = (-P // I) flattened
 func Generate1DDualMatrix(ctx context.Context, L, K uint32, field dataobjects.Field, seed int64) []uint32 {
-	P := GenerateP(L, K, field, seed)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
+	P := GenerateP(ctx, L, K, field, seed)
 
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldNegVector(P, 0, uint64(K*L), field.Mod())
+		dataobjects.FieldNegVector(doctx, P, 0, uint64(K*L), field.Mod())
 	} else {
 		for i := range P {
 			P[i] = field.Neg(P[i])
@@ -22,19 +23,14 @@ func Generate1DDualMatrix(ctx context.Context, L, K uint32, field dataobjects.Fi
 	return P
 }
 
-func generateP(L, K uint32, field dataobjects.Field, seed int64, transpose bool) []uint32 {
-	P := dataobjects.AlignedMake[uint32](uint64(L) * uint64(K))
-
-	var rng *rand.Rand
-	if dataobjects.USE_FAST_CODE {
-		utils.RandomizeVectorWithSeed(nil, 0, 1, transpose, seed)
-	} else {
-		rng = rand.New(rand.NewSource(seed))
-	}
+func generateP(ctx context.Context, L, K uint32, field dataobjects.Field, seed int64, transpose bool) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(ctx)
+	P := dataobjects.DoAlignedMake[uint32](doctx, uint64(L)*uint64(K))
 
 	if dataobjects.USE_FAST_CODE {
-		utils.RandomizeVectorWithModulus(P, L, K, transpose, field.Mod())
+		utils.RandomizeVectorWithModulusAndSeed(doctx, P, L, K, transpose, false, field.Mod(), seed, 0)
 	} else {
+		rng := rand.New(rand.NewSource(seed))
 		if transpose {
 			for j := uint32(0); j < L; j++ {
 				for i := uint32(0); i < K; i++ {
@@ -53,19 +49,23 @@ func generateP(L, K uint32, field dataobjects.Field, seed int64, transpose bool)
 	return P
 }
 
-func GenerateP(L, K uint32, field dataobjects.Field, seed int64) []uint32 {
-	return generateP(L, K, field, seed, false)
+func GenerateP(ctx context.Context, L, K uint32, field dataobjects.Field, seed int64) []uint32 {
+	return generateP(ctx, L, K, field, seed, false)
 }
 
 // Generate D = (I | P), transpose to D' = (I // P^T) and flatten
-func Generate1DRLCMatrix(L, K uint32, field dataobjects.Field, seed int64) []uint32 {
+func Generate1DRLCMatrix(ctx context.Context, L, K uint32, field dataobjects.Field, seed int64) []uint32 {
 	if dataobjects.USE_FAST_CODE {
-		return generateP(L, K, field, seed, true)
+		return generateP(ctx, L, K, field, seed, true)
 	} else {
-		P := GenerateP(L, K, field, seed)
-		defer dataobjects.Aligned1DFree(P)
+		doctx := dataobjects.GetDeferralDoContext(ctx)
+		frame := dataobjects.MakeDeferralFrame(ctx)
+		defer frame.Close()
 
-		vmatrix := dataobjects.AlignedMake[uint32](uint64(K) * uint64(L))
+		P := GenerateP(ctx, L, K, field, seed)
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, P) })
+
+		vmatrix := dataobjects.DoAlignedMake[uint32](doctx, uint64(K)*uint64(L))
 
 		idx := 0
 

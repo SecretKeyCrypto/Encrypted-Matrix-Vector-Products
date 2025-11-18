@@ -12,6 +12,24 @@ const USE_FAST_CODE_WITH_CUDA = false
 
 const ALIGNMENT uint64 = 64 // aligns up to AVX512
 
+func DoAlignedReset(doctx *DoContext) bool {
+	return true
+}
+
+func DoAlignedMake[T Primitive](doctx *DoContext, length uint64) Array[T] {
+	return AlignedMake[T](length)
+}
+
+func DoAligned1DFree[T Primitive](doctx *DoContext, array []T) bool {
+	Aligned1DFree(array)
+	return true
+}
+
+func DoAlignedSynchronize(doctx *DoContext) bool {
+	AlignedSynchronize()
+	return true
+}
+
 // AlignedMake creates a slice of type T with a specified length and default alignment.
 func AlignedMake[T Primitive](length uint64) Array[T] {
 	if length == 0 {

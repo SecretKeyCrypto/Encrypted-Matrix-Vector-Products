@@ -1,6 +1,9 @@
 package ecc
 
-import "context"
+import (
+	"RandomLinearCodePIR/dataobjects"
+	"context"
+)
 
 const (
 	ReedSolomon = "ReedSolomon"
@@ -15,7 +18,8 @@ type ECCConfig struct {
 
 type ErasureCorrectionCode interface {
 	GetGeneratorMatrix(k, n, p uint32) []uint32
-	Decode(code []uint32, noisyIndicator []bool) ([]uint32, error)
+	Decode(code []uint32, noisyIndicator []bool, possibleFailure dataobjects.PossibleFailure, p_index uint64)
+	DecodeExt(code []uint32, co, cs uint64, noisyIndicator []bool, possibleFailure dataobjects.PossibleFailure, steps uint64)
 }
 
 func GetECCCode(ctx context.Context, config ECCConfig) ErasureCorrectionCode {

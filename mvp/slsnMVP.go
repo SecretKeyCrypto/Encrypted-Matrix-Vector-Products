@@ -25,6 +25,16 @@ func (sk *SecretKey) Free() {
 	sk.PreLoadedMatrix = dataobjects.Aligned1DFree(sk.PreLoadedMatrix)
 }
 
+func (sk *SecretKey) DoFree(doctx *dataobjects.DoContext) bool {
+	if sk.PreLoadedMatrix != nil {
+		if !dataobjects.DoAligned1DFree(doctx, sk.PreLoadedMatrix) {
+			return false
+		}
+		sk.PreLoadedMatrix = nil
+	}
+	return true
+}
+
 // N = K + L denotes the length of the codeword
 // Encoding Matrix D with dimension N x L
 // Original Data Matrix has dimension M x N
@@ -51,6 +61,16 @@ func (slsnQuery *SlsnQuery) Free() {
 	slsnQuery.Vec = dataobjects.Aligned1DFree(slsnQuery.Vec)
 }
 
+func (slsnQuery *SlsnQuery) DoFree(doctx *dataobjects.DoContext) bool {
+	if slsnQuery.Vec != nil {
+		if !dataobjects.DoAligned1DFree(doctx, slsnQuery.Vec) {
+			return false
+		}
+		slsnQuery.Vec = nil
+	}
+	return true
+}
+
 type SlsnAux struct {
 	Coeff []uint32
 	Masks []uint32
@@ -60,6 +80,22 @@ type SlsnAux struct {
 func (slsnAux *SlsnAux) Free() {
 	slsnAux.Coeff = dataobjects.Aligned1DFree(slsnAux.Coeff)
 	slsnAux.Masks = dataobjects.Aligned1DFree(slsnAux.Masks)
+}
+
+func (slsnAux *SlsnAux) DoFree(doctx *dataobjects.DoContext) bool {
+	if slsnAux.Coeff != nil {
+		if !dataobjects.DoAligned1DFree(doctx, slsnAux.Coeff) {
+			return false
+		}
+		slsnAux.Coeff = nil
+	}
+	if slsnAux.Masks != nil {
+		if !dataobjects.DoAligned1DFree(doctx, slsnAux.Masks) {
+			return false
+		}
+		slsnAux.Masks = nil
+	}
+	return true
 }
 
 func (slsn *SlsnMVP) KeyGen(seed int64) SecretKey {
@@ -87,31 +123,37 @@ func (slsn *SlsnMVP) GenerateTDM(sk SecretKey) []uint32 {
 }
 
 func (slsn *SlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint32) *dataobjects.Matrix {
+	doctx := dataobjects.GetDeferralDoContext(slsn.Ctx)
 	frame := dataobjects.MakeDeferralFrame(slsn.Ctx)
 	defer frame.Close()
 
 	params := slsn.Params
-	rlcMatrix := linearcode.Generate1DRLCMatrix(params.L, params.K, params.Field, sk.LinearCodeKey)
-	frame.Defer(func() { dataobjects.Aligned1DFree(rlcMatrix) })
-	encoded := dataobjects.AlignedMake[uint32](uint64(input.Rows * params.N))
-	frame.Defer(func() { dataobjects.Aligned1DFree(encoded) })
+	rlcMatrix := linearcode.Generate1DRLCMatrix(slsn.Ctx, params.L, params.K, params.Field, sk.LinearCodeKey)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, rlcMatrix) })
+	encoded := dataobjects.DoAlignedMake[uint32](doctx, uint64(input.Rows*params.N))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, encoded) })
 
-	for i := uint32(0); i < input.Rows; i++ {
-		if dataobjects.USE_FAST_CODE {
-			dataobjects.FieldCopyVector(encoded, uint64(i*params.N), input.Data, uint64(i*params.L), uint64(params.L))
-		} else {
-			copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
+	if dataobjects.USE_FAST_CODE {
+		tdm.PermutedExtentsAssign(doctx, encoded, 0, params.N, 0, input.Data, 0, params.L, 0, uint64(params.L), nil, 0, uint64(input.Rows))
+		MatVecProductExt(doctx, rlcMatrix, 0, 0, input.Data, 0, params.L, encoded, params.L, params.N, params.K, params.L, input.Rows, params.P)
+	} else {
+		for i := uint32(0); i < input.Rows; i++ {
+			if dataobjects.USE_FAST_CODE {
+				dataobjects.FieldCopyVector(doctx, encoded, uint64(i*params.N), input.Data, uint64(i*params.L), uint64(params.L))
+			} else {
+				copy(encoded[i*params.N:i*params.N+params.L], input.Data[i*params.L:(i+1)*params.L])
+			}
+
+			MatVecProduct(doctx, rlcMatrix, input.Data[i*input.Cols:(i+1)*input.Cols], encoded[i*params.N+params.L:(i+1)*params.N],
+				params.K, params.L, params.P)
 		}
-
-		MatVecProduct(rlcMatrix, input.Data[i*input.Cols:(i+1)*input.Cols], encoded[i*params.N+params.L:(i+1)*params.N],
-			params.K, params.L, params.P)
 	}
 
 	// Add Masks
 	params.Field.AddVectors(encoded, 0, encoded, 0, mask, 0, uint64(len(encoded)))
 
-	blockwizeEncodedMatrix := dataobjects.AlignedMake[uint32](uint64(len(encoded)))
-	TransformToBlockwise(encoded, blockwizeEncodedMatrix, params.M, params.N, params.S)
+	blockwizeEncodedMatrix := dataobjects.DoAlignedMake[uint32](doctx, uint64(len(encoded)))
+	TransformToBlockwise(doctx, encoded, 0, params.N, blockwizeEncodedMatrix, 0, params.M, params.M, params.N, params.S)
 
 	return &dataobjects.Matrix{
 		Rows: params.M,
@@ -121,24 +163,28 @@ func (slsn *SlsnMVP) Encode(sk SecretKey, input dataobjects.Matrix, mask []uint3
 }
 
 func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
+	doctx := dataobjects.GetDeferralDoContext(slsn.Ctx)
 	frame := dataobjects.MakeDeferralFrame(slsn.Ctx)
 	defer frame.Close()
+
+	// FIXME - use appropriate seed
+	seed := int64(257) //utils.MakeSeed(vec)
 
 	params := slsn.Params
 
 	PofDual := sk.PreLoadedMatrix
 
 	// Sample codeword c From NullSpace
-	nullspaceCoeff := dataobjects.AlignedMake[uint32](uint64(params.K))
-	frame.Defer(func() { dataobjects.Aligned1DFree(nullspaceCoeff) })
-	utils.SampleVector(params.Field, nullspaceCoeff, params.K)
+	nullspaceCoeff := dataobjects.DoAlignedMake[uint32](doctx, uint64(params.K))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, nullspaceCoeff) })
+	utils.SampleVector(doctx, params.Field, nullspaceCoeff, params.K, seed+1)
 
-	queryVector := dataobjects.AlignedMake[uint32](uint64(params.N))
+	queryVector := dataobjects.DoAlignedMake[uint32](doctx, uint64(params.N))
 
-	MatVecProduct(PofDual, nullspaceCoeff, queryVector, params.L, params.K, params.P)
+	MatVecProduct(doctx, PofDual, nullspaceCoeff, queryVector, params.L, params.K, params.P)
 
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldCopyVector(queryVector, uint64(params.L), nullspaceCoeff, 0, uint64(params.K)) // relies on K + L = N
+		dataobjects.FieldCopyVector(doctx, queryVector, uint64(params.L), nullspaceCoeff, 0, uint64(params.K)) // relies on K + L = N
 	} else {
 		copy(queryVector[params.L:params.N], nullspaceCoeff[:params.K])
 	}
@@ -153,11 +199,11 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 	dur := time.Since(start)
 
 	// Generate Non-zero coefficient
-	coeff := dataobjects.AlignedMake[uint32](uint64(params.S))
-	utils.SampleInvertibleVec(params.Field, coeff, params.S)
+	coeff := dataobjects.DoAlignedMake[uint32](doctx, uint64(params.S))
+	utils.SampleInvertibleVec(doctx, params.Field, coeff, params.S, seed+2)
 
 	for i := uint32(0); i < params.S; i++ {
-		params.Field.MulVector(queryVector, uint64(i*params.B), queryVector, uint64(i*params.B), coeff[i], uint64(params.B))
+		dataobjects.FieldMulVectorsExt(doctx, queryVector, uint64(i*params.B), 1, queryVector, uint64(i*params.B), 1, coeff, uint64(i), 0, 1, uint64(params.B), params.Field.Mod())
 	}
 
 	return &SlsnQuery{
@@ -170,28 +216,31 @@ func (slsn *SlsnMVP) Query(sk SecretKey, vec []uint32) (*SlsnQuery, *SlsnAux) {
 }
 
 func (slsn *SlsnMVP) Answer(encodedMatrix dataobjects.Matrix, clientQuery SlsnQuery) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(slsn.Ctx)
 	params := slsn.Params
-	result := dataobjects.AlignedMake[uint32](uint64(params.S * params.M))
+	result := dataobjects.DoAlignedMake[uint32](doctx, uint64(params.S*params.M))
 
-	BlockMatVecProduct(encodedMatrix.Data, clientQuery.Vec, result, params.M, params.N, params.S, params.P)
+	BlockMatVecProduct(doctx, encodedMatrix.Data, clientQuery.Vec, result, params.M, params.N, params.S, params.P)
 	return result
 }
 
 func (slsn *SlsnMVP) Decode(sk SecretKey, response []uint32, aux SlsnAux) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(slsn.Ctx)
 	frame := dataobjects.MakeDeferralFrame(slsn.Ctx)
 	defer frame.Close()
 
 	params := slsn.Params
 
-	vec := params.Field.InvertVector(aux.Coeff)
-	frame.Defer(func() { dataobjects.Aligned1DFree(vec) })
+	vec := dataobjects.DoAlignedMake[uint32](doctx, uint64(len(aux.Coeff)))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, vec) })
+	params.Field.InvertVector(aux.Coeff, vec)
 
-	result := dataobjects.AlignedMake[uint32](uint64(params.M))
+	result := dataobjects.DoAlignedMake[uint32](doctx, uint64(params.M))
 
-	BlockVecMatProduct(response, vec, result, params.S, params.M, 1, params.P)
+	BlockVecMatProduct(doctx, response, vec, result, params.S, params.M, 1, params.P)
 	// Unmask
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldSubVectors(result, 0, result, 0, aux.Masks, 0, uint64(params.M), params.Field.Mod())
+		dataobjects.FieldSubVectors(doctx, result, 0, result, 0, aux.Masks, 0, uint64(params.M), params.Field.Mod())
 	} else {
 		for i := uint32(0); i < params.M; i++ {
 			result[i] = params.Field.Sub(result[i], aux.Masks[i])

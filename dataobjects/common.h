@@ -1,26 +1,42 @@
-#ifndef _EMVP_COMMON_H_
-#define _EMVP_COMMON_H_
+#ifndef _COMMON_H_
+#define _COMMON_H_
 
-//#ifdef USE_FAST_CODE_WITH_CUDA
+#ifdef USE_CUDA_TESTING
 
-#include <inttypes.h>
+#include "cudaobj.h"
 
-constexpr uint32_t threadsPerBlock = 256;
-constexpr uint64_t blocksPerGridFor(uint64_t length) {
-    return (length + threadsPerBlock - 1) / threadsPerBlock;
-}
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//#endif
+bool _cuda_call(bool value);
 
-inline uint32_t bitmask_for(uint32_t v) {
-    if (v == 0) return 1;
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    return v;
-}
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
-#endif /* _EMVP_COMMON_H_ */
+#define CUDA_CALL(call) _cuda_call(Cuda ## call)
+#define cuda_call(call) _cuda_call(cuda_ ## call)
+#define CUDA_CALL_BYPASS(call) Plain ## call
+#define cuda_call_bypass(call) plain_ ## call
+
+#else /* USE_CUDA_TESTING */
+
+#define CUDA_CALL(call) Cuda ## call
+#define cuda_call(call) cuda_ ## call
+#define CUDA_CALL_BYPASS(call) Cuda ## call
+#define cuda_call_bypass(call) cuda_ ## call
+
+#endif /* USE_CUDA_TESTING */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void Setup();
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#endif /* _COMMON_H_ */

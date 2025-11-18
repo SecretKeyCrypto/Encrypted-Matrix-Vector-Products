@@ -4,24 +4,7 @@
 package dataobjects
 
 /*
-#cgo LDFLAGS: -L/usr/lib/x86_64-linux-gnu -lcudart -lcudadevrt
-#include <cuda_runtime.h>
-#include <stdlib.h>
-
-void* cuda_alloc(size_t size) {
-    void* ptr;
-    cudaMallocManaged(&ptr, size, cudaMemAttachGlobal);
-	cudaMemset(ptr, 0, size);
-    return ptr;
-}
-
-void cuda_free(void* ptr) {
-    cudaFree(ptr);
-}
-
-void cuda_sync() {
-	cudaDeviceSynchronize();
-}
+#include "cudaobj.h"
 */
 import "C"
 import (
@@ -30,6 +13,38 @@ import (
 )
 
 const USE_FAST_CODE_WITH_CUDA = true
+
+var total_alloc = uint64(0)
+
+func DoAlignedReset(doctx *DoContext) bool {
+	c_result := C.cuda_doreset((*C.DoContext)(doctx.Doctx))
+	return CheckResult(bool(c_result))
+}
+
+func DoAlignedMake[T any](doctx *DoContext, length uint64) []T {
+	size := length * uint64(reflect.TypeOf((*T)(nil)).Elem().Size())
+	ptr := C.cuda_doalloc((*C.DoContext)(doctx.Doctx), C.size_t(size))
+	if ptr == nil {
+		return nil
+	}
+	total_alloc += size
+	return unsafe.Slice((*T)(ptr), length)
+}
+
+func DoAligned1DFree[T any](doctx *DoContext, array []T) bool {
+	result := true
+	if array != nil && len(array) > 0 {
+		if !C.cuda_dofree((*C.DoContext)(doctx.Doctx), unsafe.Pointer(&array[0])) {
+			result = false
+		}
+	}
+	return CheckResult(result)
+}
+
+func DoAlignedSynchronize(doctx *DoContext) bool {
+	c_result := C.cuda_dosync((*C.DoContext)(doctx.Doctx))
+	return CheckResult(bool(c_result))
+}
 
 // Allocate returns a Go slice backed by CUDA-managed memory.
 func AlignedMake[T any](length uint64) []T {

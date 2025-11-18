@@ -1,51 +1,76 @@
-#include "rnd_api.h"
-
 #ifdef USE_FAST_CODE_WITH_CUDA
 
+#include "../dataobjects/common.h"
+
 #include "cudarnd.h"
+#include "plainrnd.h"
 
-void randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose) {
-    cuda_randomize_vector(data, M, N, transpose);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+bool randomize_vector(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant) {
+    return cuda_call(randomize_vector(ctx, data, M, N, transpose, circulant));
 }
 
-void randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed) {
-    cuda_randomize_vector_with_seed(data, M, N, transpose, seed);
+bool randomize_vector_with_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, int64_t seed, int64_t offset) {
+    return cuda_call(randomize_vector_with_seed(ctx, data, M, N, transpose, circulant, seed, offset));
 }
 
-void randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus) {
-    cuda_randomize_vector_with_modulus(data, M, N, transpose, modulus);
+bool randomize_vector_with_modulus(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus) {
+    return cuda_call(randomize_vector_with_modulus(ctx, data, M, N, transpose, circulant, modulus));
 }
 
-void randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed) {
-    cuda_randomize_vector_with_modulus_and_seed(data, M, N, transpose, modulus, seed);
+bool randomize_vector_with_modulus_and_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus, int64_t seed, int64_t offset) {
+    return cuda_call(randomize_vector_with_modulus_and_seed(ctx, data, M, N, transpose, circulant, modulus, seed, offset));
 }
 
-void lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus) {
-    cuda_lpn_noise_vector(data, length, epsi, modulus);
+bool lpn_noise_vector(DoContext* ctx, uint32_t* r, uint64_t ro, uint64_t length, double epsi, uint32_t modulus, int64_t seed, int64_t offset) {
+    return cuda_call(lpn_noise_vector(ctx, r, ro, length, epsi, modulus, seed, offset));
 }
 
-#else
+bool random_permutation(DoContext* ctx, uint32_t* perm, uint32_t n, int64_t seed, int64_t offset) {
+    return cuda_call(random_permutation(ctx, perm, n, seed, offset));
+}
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#else /* USE_FAST_CODE_WITH_CUDA */
 
 #include "plainrnd.h"
 
-void randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose) {
-    plain_randomize_vector(data, M, N, transpose);
-}
-
-void randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed) {
-    plain_randomize_vector_with_seed(data, M, N, transpose, seed);
-}
-
-void randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus) {
-    plain_randomize_vector_with_modulus(data, M, N, transpose, modulus);
-}
-
-void randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed) {
-    plain_randomize_vector_with_modulus_and_seed(data, M, N, transpose, modulus, seed);
-}
-
-void lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus) {
-    plain_lpn_noise_vector(data, length, epsi, modulus);
-}
-
+#ifdef __cplusplus
+extern "C" {
 #endif
+
+bool randomize_vector(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant) {
+    return plain_randomize_vector(ctx, data, M, N, transpose, circulant);
+}
+
+bool randomize_vector_with_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, int64_t seed, int64_t offset) {
+    return plain_randomize_vector_with_seed(ctx, data, M, N, transpose, circulant, seed, offset);
+}
+
+bool randomize_vector_with_modulus(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus) {
+    return plain_randomize_vector_with_modulus(ctx, data, M, N, transpose, circulant, modulus);
+}
+
+bool randomize_vector_with_modulus_and_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus, int64_t seed, int64_t offset) {
+    return plain_randomize_vector_with_modulus_and_seed(ctx, data, M, N, transpose, circulant, modulus, seed, offset);
+}
+
+bool lpn_noise_vector(DoContext* ctx, uint32_t* r, uint64_t ro, uint64_t length, double epsi, uint32_t modulus, int64_t seed, int64_t offset) {
+    return plain_lpn_noise_vector(ctx, r, ro, length, epsi, modulus, seed, offset);
+}
+
+bool random_permutation(DoContext* ctx, uint32_t* perm, uint32_t n, int64_t seed, int64_t offset) {
+    return plain_random_permutation(ctx, perm, n, seed, offset);
+}
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#endif /* USE_FAST_CODE_WITH_CUDA */

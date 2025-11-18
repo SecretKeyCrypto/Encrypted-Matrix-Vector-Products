@@ -11,10 +11,39 @@ import (
 	"time"
 )
 
+func TestBasic(t *testing.T) {
+	ctx := dataobjects.MakeDeferralContextDefault()
+	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
+	frame := dataobjects.MakeDeferralFrame(ctx)
+	defer frame.Close()
+
+	fmt.Println("\n\nRunning TestBasic")
+
+	val := dataobjects.DoAlignedMake[uint32](doctx, 1024)
+	utils.RandomizeVectorWithModulusAndSeed(doctx, val, 1024, 1, false, false, 65537, 13, 17)
+	target := dataobjects.DoAlignedMake[uint32](doctx, 1024)
+	utils.RandomizeVectorWithModulusAndSeed(doctx, target, 1024, 1, false, false, 65537, 13, 17)
+
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
+	if dataobjects.USE_FAST_CODE {
+		if !utils.FieldVectorsAreEqual(target, 0, 0, val, 0, 0, uint32(len(target)), 1) {
+			panic("Vec doesn't match ! ")
+		}
+	} else {
+		for i := range target {
+			if target[i] != val[i] {
+				panic("Vec doesn't match ! ")
+			}
+		}
+	}
+}
+
 // Test full flow correctness of Split-LSN MVP
 func TestSlsnMVPComplete(t *testing.T) {
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -30,7 +59,7 @@ func TestSlsnMVPComplete(t *testing.T) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -41,14 +70,14 @@ func TestSlsnMVPComplete(t *testing.T) {
 		},
 	}
 
-	matrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.L, p, seed)
-	defer matrix.Free()
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.L, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
 
 	fmt.Printf("\n\nRunning SLSN Variant MVP with Database %d * %d \n", pi.Params.M, pi.Params.L)
 
-	query := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, pi.Params.P)
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, pi.Params.P)
 
 	fmt.Println("Generate Key...")
 	start := time.Now()
@@ -59,51 +88,57 @@ func TestSlsnMVPComplete(t *testing.T) {
 	start = time.Now()
 	TDM := pi.GenerateTDM(sk)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(TDM) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, TDM) })
 
 	fmt.Println("Encode Message...")
 	start = time.Now()
 	encodedMatrix := pi.Encode(sk, matrix, TDM)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer encodedMatrix.Free()
+	frame.Defer(func() { encodedMatrix.DoFree(doctx) })
 
 	fmt.Println("Generate Query...")
 	start = time.Now()
 	clientQuery, aux := pi.Query(sk, query)
 	fmt.Println("    Elapsed: ", time.Since(start))
 	fmt.Println("    Include Calculate Mask Time: ", aux.Dur)
-	defer clientQuery.Free()
-	defer aux.Free()
+	frame.Defer(func() { clientQuery.DoFree(doctx) })
+	frame.Defer(func() { aux.DoFree(doctx) })
 
 	fmt.Println("Answer...")
 	start = time.Now()
 	serverResponse := pi.Answer(*encodedMatrix, *clientQuery)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(serverResponse) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, serverResponse) })
 
 	fmt.Println("Decode...")
 	start = time.Now()
 	val := pi.Decode(sk, serverResponse, *aux)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(val) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, val) })
 
-	target := dataobjects.AlignedMake[uint32](uint64(m))
-	frame.Defer(func() { dataobjects.Aligned1DFree(target) })
-	BlockMatVecProduct(matrix.Data, query, target, m, l, 1, p)
+	target := dataobjects.DoAlignedMake[uint32](doctx, uint64(m))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, target) })
+	BlockMatVecProduct(doctx, matrix.Data, query, target, m, l, 1, p)
 
-	dataobjects.AlignedSynchronize()
-	for i := range target {
-		if target[i] != val[i] {
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
+	if dataobjects.USE_FAST_CODE {
+		if !utils.FieldVectorsAreEqual(target, 0, 0, val, 0, 0, uint32(len(target)), 1) {
 			panic("Vec doesn't match ! ")
 		}
+	} else {
+		for i := range target {
+			if target[i] != val[i] {
+				panic("Vec doesn't match ! ")
+			}
+		}
 	}
-
 }
 
 // Test full flow correctness of LPN based MVP
 func TestLPNMVPComplete(t *testing.T) {
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -118,7 +153,7 @@ func TestLPNMVPComplete(t *testing.T) {
 	pi := &LpnMVP{
 		Ctx: ctx,
 		Params: LpnParams{
-			Field:     dataobjects.NewPrimeField(p),
+			Field:     dataobjects.NewPrimeField(doctx, p),
 			K:         k,
 			N:         n,
 			M:         m,
@@ -131,20 +166,20 @@ func TestLPNMVPComplete(t *testing.T) {
 		},
 	}
 
-	matrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.L, p, seed)
-	defer matrix.Free()
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.L, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
 
 	fmt.Printf("\n\nRunning LPN Variant MVP with Database %d * %d \n", pi.Params.M, pi.Params.L)
 
-	query := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, pi.Params.P)
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, pi.Params.P)
 
 	fmt.Println("Generate Key...")
 	start := time.Now()
 	sk := pi.KeyGen(seed)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 
 	fmt.Println("Generate Trapdoored Matrix...")
 	start = time.Now()
@@ -156,35 +191,41 @@ func TestLPNMVPComplete(t *testing.T) {
 	start = time.Now()
 	encodedMatrix := pi.Encode(sk, matrix, TDM)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer encodedMatrix.Free()
+	frame.Defer(func() { encodedMatrix.DoFree(doctx) })
 
 	fmt.Println("Generate Query...")
 	start = time.Now()
 	clientQuery, aux := pi.Query(sk, query)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer clientQuery.Free()
-	defer aux.Free()
+	frame.Defer(func() { clientQuery.DoFree(doctx) })
+	frame.Defer(func() { aux.DoFree(doctx) })
 
 	fmt.Println("Answer...")
 	start = time.Now()
 	serverResponse := pi.Answer(encodedMatrix, clientQuery)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer serverResponse.Free()
+	frame.Defer(func() { serverResponse.DoFree(doctx) })
 
 	fmt.Println("Decode...")
 	start = time.Now()
-	val := pi.Decode(sk, serverResponse, aux)
+	val, _ /* TODO possibleFailure */ := pi.Decode(sk, serverResponse, aux)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(val) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, val) })
 
-	target := dataobjects.AlignedMake[uint32](uint64(m))
-	frame.Defer(func() { dataobjects.Aligned1DFree(target) })
-	MatVecProduct(matrix.Data, query, target, m, l, p)
+	target := dataobjects.DoAlignedMake[uint32](doctx, uint64(m))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, target) })
+	MatVecProduct(doctx, matrix.Data, query, target, m, l, p)
 
-	dataobjects.AlignedSynchronize()
-	for i := range target {
-		if target[i] != val[i] {
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
+	if dataobjects.USE_FAST_CODE {
+		if !utils.FieldVectorsAreEqual(target, 0, 0, val, 0, 0, uint32(len(target)), 1) {
 			panic("Vec doesn't match ! ")
+		}
+	} else {
+		for i := range target {
+			if target[i] != val[i] {
+				panic("Vec doesn't match ! ")
+			}
 		}
 	}
 }
@@ -193,6 +234,7 @@ func TestLPNMVPComplete(t *testing.T) {
 func TestRingSlsnMVPComplete(t *testing.T) {
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -208,7 +250,7 @@ func TestRingSlsnMVPComplete(t *testing.T) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -220,11 +262,12 @@ func TestRingSlsnMVPComplete(t *testing.T) {
 	}
 
 	code := linearcode.GetLinearCode(
+		ctx,
 		linearcode.LinearCodeConfig{
 			Name:  linearcode.Vandermonde,
 			K:     k,
 			L:     l,
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 		},
 	)
 
@@ -233,15 +276,15 @@ func TestRingSlsnMVPComplete(t *testing.T) {
 		LinearCodeEncoder: code,
 	}
 
-	matrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.L, p, seed)
-	defer matrix.Free()
-	query := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, pi.Params.P)
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.L, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, pi.Params.P)
 
-	target := dataobjects.AlignedMake[uint32](uint64(m))
-	frame.Defer(func() { dataobjects.Aligned1DFree(target) })
-	MatVecProduct(matrix.Data, query, target, m, l, p)
+	target := dataobjects.DoAlignedMake[uint32](doctx, uint64(m))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, target) })
+	MatVecProduct(doctx, matrix.Data, query, target, m, l, p)
 
 	fmt.Printf("\n\nRunning Ring-SLSN Variant MVP with Database %d * %d \n", pi.Params.M, pi.Params.L)
 
@@ -249,44 +292,50 @@ func TestRingSlsnMVPComplete(t *testing.T) {
 	start := time.Now()
 	sk := ring.KeyGen(seed)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 
 	fmt.Println("Generate Trapdoored Matrix...")
 	start = time.Now()
 	TDM := ring.GenerateTDM(sk)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(TDM) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, TDM) })
 
 	fmt.Println("Encode Message...")
 	start = time.Now()
 	encodedMatrix := ring.Encode(sk, matrix, TDM)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	defer matrix.Free()
+	frame.Defer(func() { matrix.DoFree(doctx) })
 
 	fmt.Println("Generate Query...")
 	start = time.Now()
 	clientQuery, aux := ring.Query(sk, query)
 	fmt.Println("    Elapsed: ", time.Since(start))
 	fmt.Println("    Include Calculate Mask Time: ", aux.Dur)
-	defer clientQuery.Free()
-	defer aux.Free()
+	frame.Defer(func() { clientQuery.DoFree(doctx) })
+	frame.Defer(func() { aux.DoFree(doctx) })
 
 	fmt.Println("Answer...")
 	start = time.Now()
 	serverResponse := ring.Answer(*encodedMatrix, *clientQuery)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(serverResponse) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, serverResponse) })
 
 	fmt.Println("Decode...")
 	start = time.Now()
 	val := ring.Decode(sk, serverResponse, *aux)
 	fmt.Println("    Elapsed: ", time.Since(start))
-	frame.Defer(func() { dataobjects.Aligned1DFree(val) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, val) })
 
-	dataobjects.AlignedSynchronize()
-	for i := range target {
-		if target[i] != val[i] {
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
+	if dataobjects.USE_FAST_CODE {
+		if !utils.FieldVectorsAreEqual(target, 0, 0, val, 0, 0, uint32(len(target)), 1) {
 			panic("Vec doesn't match ! ")
+		}
+	} else {
+		for i := range target {
+			if target[i] != val[i] {
+				panic("Vec doesn't match ! ")
+			}
 		}
 	}
 }
@@ -297,31 +346,32 @@ func BenchmarkCleartextServerExecution(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
 	p := uint32(65537)
 	_, m, l, _, _, _ := getParams()
 	seed := int64(1)
-	matrix := utils.GeneratePrimeFieldMatrix(m, l, p, seed)
-	defer matrix.Free()
-	result := dataobjects.AlignedMake[uint32](uint64(m))
-	frame.Defer(func() { dataobjects.Aligned1DFree(result) })
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, m, l, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
+	result := dataobjects.DoAlignedMake[uint32](doctx, uint64(m))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, result) })
 
 	var totalDuration time.Duration
 	b.ResetTimer()
 
-	query := dataobjects.AlignedMake[uint32](uint64(l))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, p)
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(l))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, p)
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		MatVecProduct(matrix.Data, query, result, m, l, p)
+		MatVecProduct(doctx, matrix.Data, query, result, m, l, p)
 		duration := time.Since(start)
 		totalDuration += duration
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 	fmt.Printf("Benchmark Cleartext MVP for %d x %d DB of size ~%.2f MB\n", m, l, float64(m*l*4)/float64(1024*1024))
 	printBenchmarkExecutionTime(b.N)
@@ -333,6 +383,7 @@ func BenchmarkRingSLSNEncoding(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -344,7 +395,7 @@ func BenchmarkRingSLSNEncoding(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -356,11 +407,12 @@ func BenchmarkRingSLSNEncoding(b *testing.B) {
 	}
 
 	code := linearcode.GetLinearCode(
+		ctx,
 		linearcode.LinearCodeConfig{
 			Name:  linearcode.Vandermonde,
 			K:     k,
 			L:     l,
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 		},
 	)
 
@@ -369,12 +421,12 @@ func BenchmarkRingSLSNEncoding(b *testing.B) {
 		LinearCodeEncoder: code,
 	}
 	sk := ring.KeyGen(seed)
-	defer sk.Free()
-	matrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.L, p, seed)
-	defer matrix.Free()
-	TDM := dataobjects.AlignedMake[uint32](uint64(pi.Params.M))
-	frame.Defer(func() { dataobjects.Aligned1DFree(TDM) })
-	utils.RandomPrimeFieldVector(TDM, pi.Params.L)
+	frame.Defer(func() { sk.DoFree(doctx) })
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.L, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
+	TDM := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.N*pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, TDM) })
+	utils.RandomPrimeFieldVector(doctx, TDM, p)
 
 	var totalDuration time.Duration
 
@@ -384,10 +436,10 @@ func BenchmarkRingSLSNEncoding(b *testing.B) {
 		start := time.Now()
 		matrix := ring.Encode(sk, matrix, TDM)
 		totalDuration += time.Since(start)
-		defer matrix.Free()
+		frame.Defer(func() { matrix.DoFree(doctx) })
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("\nBenchmark of Ring SLSN Encoding For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",
@@ -402,6 +454,7 @@ func BenchmarkRingSLSNQuery(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -413,7 +466,7 @@ func BenchmarkRingSLSNQuery(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -425,11 +478,12 @@ func BenchmarkRingSLSNQuery(b *testing.B) {
 	}
 
 	code := linearcode.GetLinearCode(
+		ctx,
 		linearcode.LinearCodeConfig{
 			Name:  linearcode.Vandermonde,
 			K:     k,
 			L:     l,
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 		},
 	)
 
@@ -439,27 +493,27 @@ func BenchmarkRingSLSNQuery(b *testing.B) {
 	}
 
 	sk := ring.KeyGen(seed)
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 
 	var totalDuration time.Duration
 	var unmaskDuration time.Duration
 
 	b.ResetTimer()
 
-	query := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, pi.Params.P)
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, pi.Params.P)
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
 		q, aux := ring.Query(sk, query)
 		duration := time.Since(start)
-		defer q.Free()
-		defer aux.Free()
+		frame.Defer(func() { q.DoFree(doctx) })
+		frame.Defer(func() { aux.DoFree(doctx) })
 		totalDuration += duration
 		unmaskDuration += aux.Dur
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("Ring SLSN For m = %d, l = %d, k = %d \n", m, l, k)
@@ -474,6 +528,7 @@ func BenchmarkSLSNGenerateTDM(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -485,7 +540,7 @@ func BenchmarkSLSNGenerateTDM(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -497,7 +552,7 @@ func BenchmarkSLSNGenerateTDM(b *testing.B) {
 	}
 
 	sk := pi.KeyGen(seed)
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 
 	var totalDuration time.Duration
 
@@ -507,10 +562,10 @@ func BenchmarkSLSNGenerateTDM(b *testing.B) {
 		start := time.Now()
 		TDM := pi.GenerateTDM(sk)
 		totalDuration += time.Since(start)
-		frame.Defer(func() { dataobjects.Aligned1DFree(TDM) })
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, TDM) })
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("\nBenchmark of SLSN Generate TDM For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",
@@ -524,6 +579,7 @@ func BenchmarkSLSNEncoding(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -535,7 +591,7 @@ func BenchmarkSLSNEncoding(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -547,12 +603,12 @@ func BenchmarkSLSNEncoding(b *testing.B) {
 	}
 
 	sk := pi.KeyGen(seed)
-	defer sk.Free()
-	matrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.L, p, seed)
-	defer matrix.Free()
-	TDM := dataobjects.AlignedMake[uint32](uint64(pi.Params.M))
-	frame.Defer(func() { dataobjects.Aligned1DFree(TDM) })
-	utils.RandomPrimeFieldVector(TDM, pi.Params.L)
+	frame.Defer(func() { sk.DoFree(doctx) })
+	matrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.L, p, seed, 0)
+	frame.Defer(func() { matrix.DoFree(doctx) })
+	TDM := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.M))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, TDM) })
+	utils.RandomPrimeFieldVector(doctx, TDM, pi.Params.L)
 
 	var totalDuration time.Duration
 
@@ -562,10 +618,10 @@ func BenchmarkSLSNEncoding(b *testing.B) {
 		start := time.Now()
 		m := pi.Encode(sk, matrix, TDM)
 		totalDuration += time.Since(start)
-		defer m.Free()
+		frame.Defer(func() { m.DoFree(doctx) })
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("\nBenchmark of SLSN Encoding For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",
@@ -580,6 +636,7 @@ func BenchmarkSLSNQuery(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -590,7 +647,7 @@ func BenchmarkSLSNQuery(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -602,27 +659,27 @@ func BenchmarkSLSNQuery(b *testing.B) {
 	}
 
 	sk := pi.KeyGen(seed)
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 
 	var totalDuration time.Duration
 	var unmaskDuration time.Duration
 
 	b.ResetTimer()
 
-	query := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(query) })
-	utils.RandomPrimeFieldVector(query, pi.Params.P)
+	query := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, query) })
+	utils.RandomPrimeFieldVector(doctx, query, pi.Params.P)
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
 		q, aux := pi.Query(sk, query)
 		duration := time.Since(start)
-		defer q.Free()
-		defer aux.Free()
+		frame.Defer(func() { q.DoFree(doctx) })
+		frame.Defer(func() { aux.DoFree(doctx) })
 		totalDuration += duration
 		unmaskDuration += aux.Dur
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("Benchmark of SLSN Query For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",
@@ -639,6 +696,7 @@ func BenchmarkSLSNAnswer(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -649,7 +707,7 @@ func BenchmarkSLSNAnswer(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -660,27 +718,25 @@ func BenchmarkSLSNAnswer(b *testing.B) {
 		},
 	}
 
-	encodedMatrix := utils.GeneratePrimeFieldMatrix(pi.Params.M, pi.Params.N, p, seed)
-	defer encodedMatrix.Free()
+	encodedMatrix := utils.GeneratePrimeFieldMatrix(doctx, pi.Params.M, pi.Params.N, p, seed, 0)
+	frame.Defer(func() { encodedMatrix.DoFree(doctx) })
 
 	var totalDuration time.Duration
 
 	b.ResetTimer()
 
-	clientQuery := dataobjects.AlignedMake[uint32](uint64(pi.Params.L))
-	frame.Defer(func() { dataobjects.Aligned1DFree(clientQuery) })
-	utils.RandomPrimeFieldVector(clientQuery, pi.Params.P)
+	clientQuery := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.L))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, clientQuery) })
+	utils.RandomPrimeFieldVector(doctx, clientQuery, pi.Params.P)
 	for i := 0; i < b.N; i++ {
-		frame.Defer(func() { dataobjects.Aligned1DFree(clientQuery) })
-
 		start := time.Now()
 		answer := pi.Answer(encodedMatrix, SlsnQuery{Vec: clientQuery})
 		totalDuration += time.Since(start)
-		frame.Defer(func() { dataobjects.Aligned1DFree(answer) })
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, answer) })
 
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("Benchmark of SLSN Answer For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",
@@ -695,6 +751,7 @@ func BenchmarkSLSNDecode(b *testing.B) {
 
 	ctx := dataobjects.MakeDeferralContextDefault()
 	defer dataobjects.CloseDeferralContext(ctx)
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
@@ -705,7 +762,7 @@ func BenchmarkSLSNDecode(b *testing.B) {
 	pi := &SlsnMVP{
 		Ctx: ctx,
 		Params: SlsnParams{
-			Field: dataobjects.NewPrimeField(p),
+			Field: dataobjects.NewPrimeField(doctx, p),
 			S:     s,
 			K:     k,
 			N:     n,
@@ -717,30 +774,29 @@ func BenchmarkSLSNDecode(b *testing.B) {
 	}
 
 	sk := pi.KeyGen(seed)
-	defer sk.Free()
+	frame.Defer(func() { sk.DoFree(doctx) })
 	var totalDuration time.Duration
 
 	b.ResetTimer()
 
-	response := dataobjects.AlignedMake[uint32](uint64(pi.Params.M * pi.Params.S))
-	frame.Defer(func() { dataobjects.Aligned1DFree(response) })
-	mask := dataobjects.AlignedMake[uint32](uint64(pi.Params.M))
-	frame.Defer(func() { dataobjects.Aligned1DFree(mask) })
+	response := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.M*pi.Params.S))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, response) })
+	mask := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.M))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, mask) })
+	coeff := dataobjects.DoAlignedMake[uint32](doctx, uint64(pi.Params.S))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, coeff) })
 	for i := 0; i < b.N; i++ {
-		utils.RandomPrimeFieldVector(response, pi.Params.P)
-		frame.Defer(func() { dataobjects.Aligned1DFree(response) })
-		coeff := utils.RandomSplitLSNNoiseCoeff(pi.Params.S, pi.Params.P)
-		frame.Defer(func() { dataobjects.Aligned1DFree(coeff) })
-		utils.RandomPrimeFieldVector(mask, pi.Params.P)
-		frame.Defer(func() { dataobjects.Aligned1DFree(mask) })
+		utils.RandomPrimeFieldVector(doctx, response, pi.Params.P)
+		utils.RandomSplitLSNNoiseCoeff(doctx, coeff, pi.Params.P)
+		utils.RandomPrimeFieldVector(doctx, mask, pi.Params.P)
 
 		start := time.Now()
 		decoded := pi.Decode(sk, response, SlsnAux{Coeff: coeff, Masks: mask})
 		totalDuration += time.Since(start)
-		frame.Defer(func() { dataobjects.Aligned1DFree(decoded) })
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, decoded) })
 	}
 
-	dataobjects.AlignedSynchronize()
+	dataobjects.CheckResult(dataobjects.DoAlignedSynchronize(doctx))
 	b.StopTimer()
 
 	fmt.Printf("Benchmark of SLSN Decoding For %d x %d DB(~%.2f MB), encoded to %d x %d with block size %d \n",

@@ -24,29 +24,48 @@ func NewReedSolomonCode(ctx context.Context, k, n, q uint32) *ReedSolomonCode {
 
 // Only return the evaluation part
 func (rs *ReedSolomonCode) GetGeneratorMatrix(M_1, ECCLength, p uint32) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(rs.ctx)
 	frame := dataobjects.MakeDeferralFrame(rs.ctx)
 	defer frame.Close()
 
-	alphas := dataobjects.AlignedMake[uint32](uint64(ECCLength))
-	dataobjects.FieldRangeVector(alphas, 0, 0, uint64(ECCLength))
-	frame.Defer(func() { dataobjects.Aligned1DFree(alphas) })
-	rsGeneratorMatrix := dataobjects.AlignedMake[uint32](uint64(M_1 * ECCLength))
+	alphas := dataobjects.DoAlignedMake[uint32](doctx, uint64(ECCLength))
+	dataobjects.FieldRangeVector(doctx, alphas, 0, 0, uint64(ECCLength))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, alphas) })
+	rsGeneratorMatrix := dataobjects.DoAlignedMake[uint32](doctx, uint64(M_1*ECCLength))
 
-	// FIXME - make fast on GPU
-	GenerateSystematicRSMatrix(ECCLength, M_1, p, M_1, alphas, rsGeneratorMatrix)
+	GenerateSystematicRSMatrix(doctx, ECCLength, M_1, p, alphas, rsGeneratorMatrix)
 	return rsGeneratorMatrix
 }
 
-func (rs *ReedSolomonCode) Decode(code []uint32, noisyQuery []bool) ([]uint32, error) {
-	// FIXME - make fast on GPU
-	if !isAllFalse(noisyQuery[:rs.k]) {
-		frame := dataobjects.MakeDeferralFrame(rs.ctx)
-		defer frame.Close()
+func (rs *ReedSolomonCode) DecodeExt(code []uint32, co, cs uint64, noisyQuery []bool, possibleFailure dataobjects.PossibleFailure, steps uint64) {
+	if dataobjects.USE_FAST_CODE {
+		doctx := dataobjects.GetDeferralDoContext(rs.ctx)
+		ReedSolomonDecode(doctx, code, co, cs, noisyQuery, uint32(len(noisyQuery)), rs.k, rs.q, possibleFailure.Success, steps)
+	} else {
+		for s := range steps {
+			rs.Decode(code[co+s*cs:co+(s+1)*cs], noisyQuery, possibleFailure, s)
+		}
+	}
+}
 
-		x_in := dataobjects.AlignedMake[uint32](uint64(rs.k))
-		frame.Defer(func() { dataobjects.Aligned1DFree(x_in) })
-		y_in := dataobjects.AlignedMake[uint32](uint64(rs.k))
-		frame.Defer(func() { dataobjects.Aligned1DFree(y_in) })
+func (rs *ReedSolomonCode) Decode(code []uint32, noisyQuery []bool, possibleFailure dataobjects.PossibleFailure, p_index uint64) {
+	doctx := dataobjects.GetDeferralDoContext(rs.ctx)
+	frame := dataobjects.MakeDeferralFrame(rs.ctx)
+	defer frame.Close()
+
+	dataobjects.FieldSetVector(doctx, possibleFailure.Success, 0, 1, 1)
+
+	possibleFailure.Err[p_index] = errors.New("decoding failed due to not enough data")
+
+	if dataobjects.USE_FAST_CODE {
+		ReedSolomonDecode(doctx, code, 0, 0, noisyQuery, uint32(len(noisyQuery)), rs.k, rs.q, possibleFailure.Success, 1)
+		return
+	}
+	if !isAllFalse(noisyQuery[:rs.k]) {
+		x_in := dataobjects.DoAlignedMake[uint32](doctx, uint64(rs.k))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, x_in) })
+		y_in := dataobjects.DoAlignedMake[uint32](doctx, uint64(rs.k))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, y_in) })
 		idx := uint32(0)
 		for i := range noisyQuery {
 			if !noisyQuery[i] && idx < rs.k {
@@ -57,22 +76,19 @@ func (rs *ReedSolomonCode) Decode(code []uint32, noisyQuery []bool) ([]uint32, e
 		}
 
 		if idx < rs.k {
-			return nil, errors.New("decoding failed due to not enough data")
+			possibleFailure.Success[p_index] = 0
+			return
 		}
 
 		// TODO: Replace it with ReedSolomon Decoder
 		for i := uint32(0); i < rs.k; i++ {
 			if noisyQuery[i] {
-				// FIXME - make fast on GPU
-				code[i] = LagrangeInterpEval(x_in, y_in, rs.k, i, rs.q)
+				LagrangeInterpEval(doctx, code[i:i+1], x_in, y_in, rs.k, i, rs.q)
 			}
 		}
 	}
-	// The slice starting from 0 is critical for it to be correctly freed
-	return code[:rs.k], nil
 }
 
-// FIXME - make fast on GPU
 func isAllFalse(vec []bool) bool {
 	for i := range vec {
 		if vec[i] {

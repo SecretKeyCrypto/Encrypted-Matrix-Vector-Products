@@ -1,8 +1,11 @@
 #!/bin/bash
 
+set -e
+
 if [[ "$(uname)" == "Darwin" ]]; then
     export CGO_LDFLAGS="-L$(brew --prefix openssl@3)/lib"
     export CGO_CFLAGS="-I$(brew --prefix openssl@3)/include"
+    export CGO_CXXFLAGS="-I$(brew --prefix openssl@3)/include"
     echo "[Info] Using OpenSSL from $(brew --prefix openssl@3)"
 fi
 
@@ -28,45 +31,63 @@ else
     SIMD_FLAGS=""
 fi
 
-if test -z "$EMVP_USE_CUDA"
+if test -n "$EMVP_USE_CUDA"
 then
-  EXTRA_CXX_FLAGS=
-else
-  EXTRA_CXX_FLAGS=-DUSE_FAST_CODE_WITH_CUDA
+  EXTRA_CXX_FLAGS="$EXTRA_CXX_FLAGS -DUSE_FAST_CODE_WITH_CUDA"
 fi
 
-COMMONFLAGS="-std=c++17 -O3 -I/opt/homebrew/include"
+COMMONFLAGS="-std=c++17 -I/opt/homebrew/include"
 CXXFLAGS="$CXXFLAGS $COMMONFLAGS -march=native $SIMD_FLAGS $EXTRA_CXX_FLAGS"
-NVCCFLAGS="$NVCCFLAGS $COMMONFLAGS --expt-relaxed-constexpr -rdc=true -lcudart $EXTRA_CXX_FLAGS"
+NVCCFLAGS="$NVCCFLAGS $COMMONFLAGS --expt-relaxed-constexpr -rdc=true -Xcompiler -fPIC $EXTRA_CXX_FLAGS $EXTRA_NVCC_FLAGS"
 
-$CXX $CXXFLAGS -c dataobjects/fields.cpp -o dataobjects/fields.o 
-$CXX $CXXFLAGS -c dataobjects/matrices.cpp -o dataobjects/matrices.o 
-if test -z "$EMVP_USE_CUDA"
+CGO_CFLAGS="$CGO_CFLAGS $EXTRA_CGO_CFLAGS"
+CGO_CXXFLAGS="$CGO_CXXFLAGS $EXTRA_CXXGO_CFLAGS"
+
+CUOBJS=()
+
+function makelib() {
+  dir="$1"; shift
+  lib="$1"; shift
+  objs=()
+  cuobjs=()
+  for name in "$@"
+  do
+    ext="${name##*.}"
+    base="${name%.*}"
+    if [ "$ext" = "cpp" ]
+    then
+      if [ "$dir/$name" -nt "$dir/$base.o" ]
+      then
+        (set -x; $CXX $CXXFLAGS -c "$dir/$name" -o "$dir/$base.o")
+      fi
+      objs+=("$dir/$base.o")
+    elif [ "$ext" = "cu" -a -n "$EMVP_USE_CUDA" ]
+    then
+      if [ "$dir/$name" -nt "$dir/$base.o" ]
+      then
+        (set -x; $NVCC $NVCCFLAGS -c "$dir/$name" -o "$dir/$base.o")
+      fi
+      cuobjs+=("$dir/$base.o")
+    fi
+  done
+  if [ -n "$cuobjs" ]
+  then
+    CUOBJS+=("${cuobjs[@]}")
+  fi
+  (set -x; ar rcs "$dir/lib$lib.a" "${objs[@]}" "${cuobjs[@]}")
+}
+
+makelib dataobjects dataobjects common.cpp docontext.cpp fields.cpp plainfields.cpp matrices.cpp plainmatrices.cpp cudacommon.cu cudaobj.cu cudafields.cu cudamatrices.cu cudagraph.cu
+
+makelib tdm NTT NTT.cpp tdm.cpp plainntt.cpp plaintdm.cpp cudantt.cu cudatdm.cu
+
+makelib mvp MVP mvp.cpp plainmvp.cpp matrixShapeTransform.cpp plainMST.cpp lpn.cpp plainlpn.cpp cudamvp.cu cudaMST.cu cudalpn.cu
+
+makelib ecc ReedSolomon ReedSolomon.cpp plainRS.cpp cudaRS.cu
+
+makelib utils utils rnd_api.cpp testutils.cpp plainrnd.cpp plaintestutils.cpp cudarnd.cu cudatestutils.cu
+
+if [ -n "$CUOBJS" ]
 then
-  ar rcs dataobjects/libdataobjects.a dataobjects/fields.o
-else
-  $NVCC $NVCCFLAGS -c dataobjects/cudafields.cu -o dataobjects/cudafields.o 
-  $NVCC $NVCCFLAGS -c dataobjects/cudamatrices.cu -o dataobjects/cudamatrices.o 
-  $NVCC $NVCCFLAGS -c dataobjects/cudacontext.cu -o dataobjects/cudacontext.o 
-  ar rcs dataobjects/libdataobjects.a dataobjects/fields.o dataobjects/cudafields.o dataobjects/cudacontext.o
-fi
-
-$CXX $CXXFLAGS -c tdm/NTT.cpp -o tdm/NTT.o 
-ar rcs tdm/libNTT.a tdm/NTT.o
-
-$CXX $CXXFLAGS -c mvp/mvp.cpp -o mvp/mvp.o 
-$CXX $CXXFLAGS -c mvp/matrixShapeTransform.cpp -o mvp/matrixShapeTransform.o 
-ar rcs mvp/libMVP.a mvp/mvp.o mvp/matrixShapeTransform.o
-
-$CXX $CXXFLAGS -c ecc/ReedSolomon.cpp -o ecc/ReedSolomon.o 
-ar rcs ecc/libReedSolomon.a ecc/ReedSolomon.o
-
-$CXX $CXXFLAGS -c utils/rnd_api.cpp -o utils/rnd_api.o 
-if test -z "$EMVP_USE_CUDA"
-then
-  $CXX $CXXFLAGS -c utils/plainrnd.cpp -o utils/plainrnd.o 
-  ar rcs utils/libutils.a utils/rnd_api.o utils/plainrnd.o
-else
-  $NVCC $NVCCFLAGS -c utils/cudarnd.cu -o utils/cudarnd.o 
-  ar rcs utils/libutils.a utils/rnd_api.o utils/cudarnd.o
+  (set -x; $NVCC -dlink "${CUOBJS[@]}" -o "cuda_devlink.o" -lcudart -lcudadevrt)
 fi

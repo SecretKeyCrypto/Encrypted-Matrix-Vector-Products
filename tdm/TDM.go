@@ -2,7 +2,7 @@ package tdm
 
 /*
 #cgo CFLAGS: -I../TDM
-#cgo LDFLAGS: -L../TDM -L/opt/homebrew/lib -lNTT -lntl -lgmp -lstdc++
+#cgo LDFLAGS: -L../TDM -L/opt/homebrew/lib -lNTT -lstdc++
 #include "NTT.h"
 */
 import "C"
@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	USE_FAST_CODE_FOR_CIRCULANT = true
-	ExpansionFactor             = 2
-	SliceSeedShift              = 13758
+	ExpansionFactor = 2
+	SliceSeedShift  = 13758
 )
 
 type TDM struct {
@@ -39,26 +38,32 @@ type TDM struct {
 }
 
 func (td *TDM) GenerateTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
 	td.updateInternalUseParams()
-	fullTDM := dataobjects.AlignedMake[uint32](uint64(td.m) * uint64(td.n))
-	blockTDM := dataobjects.AlignedMake[uint32](uint64(td.block) * uint64(td.block))
-	frame.Defer(func() { dataobjects.Aligned1DFree(blockTDM) })
+	fullTDM := dataobjects.DoAlignedMake[uint32](doctx, uint64(td.m)*uint64(td.n))
+	blockTDM := dataobjects.DoAlignedMake[uint32](doctx, uint64(td.block)*uint64(td.block))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, blockTDM) })
 
+	// NOTE - rely on a small number of iterations here
 	for i := uint32(0); i < td.m/td.block; i++ {
 		for j := uint32(0); j < td.n/td.block; j++ {
 			seed := int64(i*td.m/td.block + j)
 			td.GenerateBasicTrapDooredMatrix(blockTDM, seedL+seed, seedPL+seed, seedC+seed, seedPR+seed, seedR+seed)
 
-			for k := uint32(0); k < td.block; k++ {
-				i0 := i*td.block + k
-				j0 := j * td.block
-				if dataobjects.USE_FAST_CODE {
-					dataobjects.FieldCopyVector(fullTDM, uint64(i0*td.n+j0), blockTDM, uint64(k*td.block), uint64(min(td.n, td.block)))
-				} else {
-					copy(fullTDM[i0*td.n+j0:(i0+1)*td.n], blockTDM[k*td.block:(k+1)*td.block])
+			if dataobjects.USE_FAST_CODE {
+				PermutedExtentsAssign(doctx, fullTDM, (i+j)*td.block, td.n, 0, blockTDM, 0, td.block, 0, uint64(min(td.n, td.block)), nil, 0, uint64(td.block))
+			} else {
+				for k := uint32(0); k < td.block; k++ {
+					i0 := i*td.block + k
+					j0 := j * td.block
+					if dataobjects.USE_FAST_CODE {
+						dataobjects.FieldCopyVector(doctx, fullTDM, uint64(i0*td.n+j0), blockTDM, uint64(k*td.block), uint64(min(td.n, td.block)))
+					} else {
+						copy(fullTDM[i0*td.n+j0:(i0+1)*td.n], blockTDM[k*td.block:(k+1)*td.block])
+					}
 				}
 			}
 		}
@@ -69,28 +74,29 @@ func (td *TDM) GenerateTrapDooredMatrix(seedL, seedPL, seedC, seedPR, seedR int6
 
 // The basic Trapdoor matrix has the form R = S_L * Pi_L * S * Pi_R * S_R where it expands k x k matrix by factor of the ExpansionFactor (2)
 func (td *TDM) GenerateBasicTrapDooredMatrix(result []uint32, seedL, seedPL, seedC, seedPR, seedR int64) {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
-	permR := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	utils.GetPermutation(permR, ExpansionFactor*td.block, seedPR)
-	frame.Defer(func() { dataobjects.Aligned1DFree(permR) })
+	permR := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block))
+	utils.GetPermutation(doctx, permR, ExpansionFactor*td.block, seedPR, 0)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, permR) })
 	S_R := GetQuasiCyclicMatrix(td.Ctx, td.block, td.Q, seedR, permR)
-	frame.Defer(func() { dataobjects.Aligned1DFree(S_R) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, S_R) })
 
 	// R = S x perm(S_R)
-	permL := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	utils.GetPermutation(permL, ExpansionFactor*td.block, seedPL)
-	frame.Defer(func() { dataobjects.Aligned1DFree(permL) })
-	R := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor*td.block) * uint64(td.block))
-	CirculantMatrixMul(td.Ctx, R, ExpansionFactor*td.block, td.Q, td.root2K, seedC, S_R, 2*td.block, td.block, permL)
-	frame.Defer(func() { dataobjects.Aligned1DFree(R) })
+	permL := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, permL) })
+	utils.GetPermutation(doctx, permL, ExpansionFactor*td.block, seedPL, 0)
+	R := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block)*uint64(td.block))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, R) })
+	CirculantMatrixMul(td.Ctx, R, ExpansionFactor*td.block, td.Q, td.root2K, seedC, S_R, 0, 2*td.block, td.block, permL)
 
 	// S_L has the form [I | C]
 	L := result
-	CirculantMatrixMul(td.Ctx, L, td.block, td.Q, td.rootK, seedL, R[td.block*td.block:], (ExpansionFactor-1)*td.block, td.block, nil)
+	CirculantMatrixMul(td.Ctx, L, td.block, td.Q, td.rootK, seedL, R, td.block*td.block, (ExpansionFactor-1)*td.block, td.block, nil)
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldAddVectors(L, 0, R, 0, L, 0, uint64(td.block*td.block), td.Q)
+		dataobjects.FieldAddVectors(doctx, L, 0, R, 0, L, 0, uint64(td.block*td.block), td.Q)
 	} else {
 		for i := uint32(0); i < td.block; i++ {
 			for j := uint32(0); j < td.block; j++ {
@@ -101,44 +107,54 @@ func (td *TDM) GenerateBasicTrapDooredMatrix(result []uint32, seedL, seedPL, see
 }
 
 func (td *TDM) GenerateFlattenedTrapDooredMatrix() []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
 	td.updateInternalUseParams()
-	result := dataobjects.AlignedMake[uint32](uint64(td.M * td.N))
+	result := dataobjects.DoAlignedMake[uint32](doctx, uint64(td.M*td.N))
 	R := td.GenerateTrapDooredMatrix(td.SeedL, td.SeedPL, td.SeedC, td.SeedPR, td.SeedR)
-	frame.Defer(func() { dataobjects.Aligned1DFree(R) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, R) })
 
 	// Only return the upper-left cornor of the TDM
-	for i := uint32(0); i < td.M; i++ {
-		if dataobjects.USE_FAST_CODE {
-			dataobjects.FieldCopyVector(result, uint64(i*td.N), R, uint64(i*td.n), uint64(min(td.N, td.n)))
-		} else {
-			copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
+	if dataobjects.USE_FAST_CODE {
+		PermutedExtentsAssign(doctx, result, 0, td.N, 0, R, 0, td.n, 0, uint64(min(td.N, td.n)), nil, 0, uint64(td.M))
+	} else {
+		for i := uint32(0); i < td.M; i++ {
+			if dataobjects.USE_FAST_CODE {
+				dataobjects.FieldCopyVector(doctx, result, uint64(i*td.N), R, uint64(i*td.n), uint64(min(td.N, td.n)))
+			} else {
+				copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
+			}
 		}
 	}
 	return result
 }
 
 func (td *TDM) GenerateFlattenedTrapDooredMatrixPerSlice(sliceNum int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
 	td.updateInternalUseParams()
-	result := dataobjects.AlignedMake[uint32](uint64(td.M * td.N))
+	result := dataobjects.DoAlignedMake[uint32](doctx, uint64(td.M*td.N))
 	R := td.GenerateTrapDooredMatrix(td.SeedL+sliceNum*SliceSeedShift,
 		td.SeedPL+sliceNum*SliceSeedShift,
 		td.SeedC+sliceNum*SliceSeedShift,
 		td.SeedPR+sliceNum*SliceSeedShift,
 		td.SeedR+sliceNum*SliceSeedShift)
-	frame.Defer(func() { dataobjects.Aligned1DFree(R) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, R) })
 
 	// Only return the upper-left cornor of the TDM
-	for i := uint32(0); i < td.M; i++ {
-		if dataobjects.USE_FAST_CODE {
-			dataobjects.FieldCopyVector(result, uint64(i*td.N), R, uint64(i*td.n), uint64(min(td.N, td.n)))
-		} else {
-			copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
+	if dataobjects.USE_FAST_CODE {
+		PermutedExtentsAssign(doctx, result, 0, td.N, 0, R, 0, td.n, 0, uint64(min(td.N, td.n)), nil, 0, uint64(td.M))
+	} else {
+		for i := uint32(0); i < td.M; i++ {
+			if dataobjects.USE_FAST_CODE {
+				dataobjects.FieldCopyVector(doctx, result, uint64(i*td.N), R, uint64(i*td.n), uint64(min(td.N, td.n)))
+			} else {
+				copy(result[i*td.N:(i+1)*td.N], R[i*td.n:(i+1)*td.n])
+			}
 		}
 	}
 	return result
@@ -148,104 +164,114 @@ func (td *TDM) EvaluationCircuit(v []uint32) []uint32 {
 	return td.EvaluationCircuitPerSlice(v, 0)
 }
 
-func (td *TDM) EvaluationCircuitPerSliceInPlace(masks, bv, v []uint32, sliceNum int64) []uint32 {
+func (td *TDM) EvaluationCircuitPerSliceInPlace(masks []uint32, mo uint32, bv []uint32, bo, bvlen uint32, v []uint32, vo, vlen uint32, sliceNum int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	td.updateInternalUseParams()
 
 	if !dataobjects.USE_FAST_CODE {
-		if int(td.n) > len(v) {
-			padded := dataobjects.AlignedMake[uint32](uint64(td.n))
+		if td.n > vlen {
+			padded := dataobjects.DoAlignedMake[uint32](doctx, uint64(td.n))
 			copy(padded, v)
 			v = padded
 		}
 	}
 
+	// TODO - rely on a small number of iterations here - EvaluationCircuitBasic is not easy to lift
 	for j := uint32(0); j < td.n/td.block; j++ {
 		if dataobjects.USE_FAST_CODE {
-			vstart, vend, vlength, bvlength := uint64(j)*uint64(td.block), uint64(j+1)*uint64(td.block), uint64(len(v)), uint64(len(bv))
+			vstart, vend, vlength, bvlength := uint64(j)*uint64(td.block), uint64(j+1)*uint64(td.block), uint64(vlen), uint64(bvlen)
 			if vstart < vlength {
 				copylen := min(bvlength, vlength-vstart)
-				dataobjects.FieldCopyVector(bv, 0, v, vstart, copylen)
+				dataobjects.FieldCopyVector(doctx, bv, uint64(bo), v, uint64(vo)+vstart, copylen)
 				if vend > copylen && bvlength > copylen {
-					dataobjects.FieldSetVector(bv, copylen, min(bvlength-copylen, vend-copylen), 0)
+					dataobjects.FieldSetVector(doctx, bv, uint64(bo)+copylen, min(bvlength-copylen, vend-copylen), 0)
 				}
 			}
 		} else {
-			copy(bv, v[j*td.block:(j+1)*td.block])
+			copy(bv, v[vo+j*td.block:(j+1)*td.block])
 		}
 		for i := uint32(0); i < td.m/td.block; i++ {
 			// Calculate the seed for each block, and use ECBasic to evaluate
-			temp := td.EvaluationCircuitBasic(bv, int64(i*td.m/td.block+j)+sliceNum*SliceSeedShift)
+			temp := td.EvaluationCircuitBasic(bv, bo, int64(i*td.m/td.block+j)+sliceNum*SliceSeedShift)
 			if dataobjects.USE_FAST_CODE {
-				dataobjects.FieldAddVectors(masks, uint64(i*td.block), masks, uint64(i*td.block), temp, 0, uint64(td.block), td.Q)
+				dataobjects.FieldAddVectors(doctx, masks, uint64(mo+i*td.block), masks, uint64(mo+i*td.block), temp, 0, uint64(td.block), td.Q)
 			} else {
 				for k := uint32(0); k < td.block; k++ {
-					masks[i*td.block+k] = uint32((uint64(masks[i*td.block+k]) + uint64(temp[k])) % uint64(td.Q))
+					masks[mo+i*td.block+k] = uint32((uint64(masks[mo+i*td.block+k]) + uint64(temp[k])) % uint64(td.Q))
 				}
 			}
 		}
 	}
 
-	// The slice starting from 0 is critical for it to be correctly freed
-	return masks[0:td.M]
+	return masks[mo : mo+td.M]
 }
 
-func (td *TDM) AllocateMaskForEvaluationCircuitPerSlice() []uint32 {
+func (td *TDM) AllocateMaskForEvaluationCircuitPerSlice(count uint32) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	td.updateInternalUseParams()
-	return dataobjects.AlignedMake[uint32](uint64(td.m))
+	return dataobjects.DoAlignedMake[uint32](doctx, uint64(td.m*count))
 }
 
-func (td *TDM) AllocateBlockVectorForEvaluationCircuitPerSlice() []uint32 {
+func (td *TDM) AllocateBlockVectorForEvaluationCircuitPerSlice(count uint32) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	td.updateInternalUseParams()
-	return dataobjects.AlignedMake[uint32](uint64(td.block))
+	return dataobjects.DoAlignedMake[uint32](doctx, uint64(td.block*count))
 }
 
 func (td *TDM) EvaluationCircuitPerSlice(v []uint32, sliceNum int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
-	masks := td.AllocateMaskForEvaluationCircuitPerSlice()
-	bv := td.AllocateBlockVectorForEvaluationCircuitPerSlice()
-	frame.Defer(func() { dataobjects.Aligned1DFree(bv) })
+	masks := td.AllocateMaskForEvaluationCircuitPerSlice(1)
+	bv := td.AllocateBlockVectorForEvaluationCircuitPerSlice(1)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, bv) })
 
-	return td.EvaluationCircuitPerSliceInPlace(masks, bv, v, sliceNum)
+	return td.EvaluationCircuitPerSliceInPlace(masks, 0, bv, 0, uint32(len(bv)), v, 0, uint32(len(v)), sliceNum)
 }
 
-func (td *TDM) EvaluationCircuitBasic(v []uint32, addOnSeed int64) []uint32 {
+func (td *TDM) EvaluationCircuitBasic(v []uint32, vo uint32, addOnSeed int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(td.Ctx)
 	frame := dataobjects.MakeDeferralFrame(td.Ctx)
 	defer frame.Close()
 
 	// S_R = [I | C] x v
-	resR := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	frame.Defer(func() { dataobjects.Aligned1DFree(resR) })
-	vecR := CirculantVectorMul(td.Ctx, td.block, td.Q, td.rootK, td.SeedR+addOnSeed, v, nil)
-	frame.Defer(func() { dataobjects.Aligned1DFree(vecR) })
+	resR := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, resR) })
+	vecR := CirculantVectorMul(td.Ctx, td.block, td.Q, td.rootK, td.SeedR+addOnSeed, v, vo, nil)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, vecR) })
 
 	// Apply PermR
-	permR := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	utils.GetPermutation(permR, ExpansionFactor*td.block, td.SeedPR+addOnSeed)
-	frame.Defer(func() { dataobjects.Aligned1DFree(permR) })
-	i := uint32(0)
-	for ; i < td.block; i++ {
-		ii := permR[i]
-		resR[ii] = v[i]
-	}
-	for ; i < ExpansionFactor*td.block; i++ {
-		ii := permR[i]
-		ix := i - td.block
-		resR[ii] = vecR[ix]
+	permR := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block))
+	utils.GetPermutation(doctx, permR, ExpansionFactor*td.block, td.SeedPR+addOnSeed, 0)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, permR) })
+	if dataobjects.USE_FAST_CODE {
+		PermutedExtentsAssign(doctx, resR, 0, 0, 1, v, vo, 1, 0, 1, permR, 0, uint64(td.block))
+		PermutedExtentsAssign(doctx, resR, 0, 0, 1, vecR, 0, 1, 0, 1, permR, td.block, uint64((ExpansionFactor-1)*td.block))
+	} else {
+		i := uint32(0)
+		for ; i < td.block; i++ {
+			ii := permR[i]
+			resR[ii] = v[vo+i]
+		}
+		for ; i < ExpansionFactor*td.block; i++ {
+			ii := permR[i]
+			ix := i - td.block
+			resR[ii] = vecR[ix]
+		}
 	}
 
 	// Multiply by S
-	permC := dataobjects.AlignedMake[uint32](uint64(ExpansionFactor * td.block))
-	utils.GetPermutation(permC, ExpansionFactor*td.block, td.SeedPL+addOnSeed)
-	frame.Defer(func() { dataobjects.Aligned1DFree(permC) })
-	resC := CirculantVectorMul(td.Ctx, ExpansionFactor*td.block, td.Q, td.root2K, td.SeedC+addOnSeed, resR, permC)
+	permC := dataobjects.DoAlignedMake[uint32](doctx, uint64(ExpansionFactor*td.block))
+	utils.GetPermutation(doctx, permC, ExpansionFactor*td.block, td.SeedPL+addOnSeed, 0)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, permC) })
+	resC := CirculantVectorMul(td.Ctx, ExpansionFactor*td.block, td.Q, td.root2K, td.SeedC+addOnSeed, resR, 0, permC)
 
 	// S_L = [I // C] x resC
-	vecC := CirculantVectorMul(td.Ctx, td.block, td.Q, td.rootK, td.SeedL+addOnSeed, resC[td.block:], nil)
-	frame.Defer(func() { dataobjects.Aligned1DFree(vecC) })
+	vecC := CirculantVectorMul(td.Ctx, td.block, td.Q, td.rootK, td.SeedL+addOnSeed, resC, td.block, nil)
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, vecC) })
 	if dataobjects.USE_FAST_CODE {
-		dataobjects.FieldAddVectors(resC, 0, resC, 0, vecC, 0, uint64(td.block), td.Q)
+		dataobjects.FieldAddVectors(doctx, resC, 0, resC, 0, vecC, 0, uint64(td.block), td.Q)
 	} else {
 		for i := uint32(0); i < td.block; i++ {
 			resC[i] = uint32((uint64(resC[i]) + uint64(vecC[i])) % uint64(td.Q))
@@ -255,20 +281,16 @@ func (td *TDM) EvaluationCircuitBasic(v []uint32, addOnSeed int64) []uint32 {
 	return resC[:td.block]
 }
 
-func CirculantMatrixMul(ctx context.Context, result []uint32, blockSize, q, root uint32, seed int64, mat []uint32, matRows, matCols uint32, perm []uint32) {
+func CirculantMatrixMul(ctx context.Context, result []uint32, blockSize, q, root uint32, seed int64, mat []uint32, matOffset, matRows, matCols uint32, perm []uint32) {
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
-	polyQC := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(polyQC) })
-	res := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(res) })
+	polyQC := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, polyQC) })
 
-	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
-		utils.RandomizeVectorWithModulusAndSeed(polyQC, blockSize, 1, false, q, seed)
-		for t := uint32(1); t < blockSize/2; t++ {
-			polyQC[t], polyQC[blockSize-t] = polyQC[blockSize-t], polyQC[t]
-		}
+	if dataobjects.USE_FAST_CODE {
+		utils.RandomizeVectorWithModulusAndSeed(doctx, polyQC, 1, blockSize, false, true, q, seed, 0)
 	} else {
 		rng := rand.New(rand.NewSource(seed))
 		polyQC[0] = uint32(rng.Intn(int(q)))
@@ -277,43 +299,61 @@ func CirculantMatrixMul(ctx context.Context, result []uint32, blockSize, q, root
 		}
 	}
 
-	v := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(v) })
-	tmpA := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(tmpA) })
-	tmpB := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(tmpB) })
+	if dataobjects.USE_FAST_CODE {
+		res := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize*matCols))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, res) })
+		resT := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize*matCols))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, resT) })
+		v := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize*matCols))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, v) })
 
-	for j := uint32(0); j < matCols; j++ {
-		for i := uint32(0); i < matRows; i++ {
-			v[i] = mat[i*matCols+j]
-		}
-		NTT_Convolution(polyQC, v, tmpA, tmpB, res, blockSize, root, q)
-		if perm == nil {
-			for i := uint32(0); i < uint32(len(res)); i++ {
-				result[i*matCols+j] = res[i]
+		dataobjects.MatrixTranspose(doctx, v, 0, mat, matOffset, matRows, matCols)
+		NTT_Convolution(doctx, polyQC, 0, 0, v, 0, blockSize, resT, 0, blockSize, blockSize, matCols, root, q)
+		dataobjects.MatrixTranspose(doctx, res, 0, resT, 0, matCols, blockSize)
+		PermutedExtentsAssign(doctx, result, 0, 0, matCols, res, 0, matCols, 0, uint64(matCols), perm, 0, uint64(blockSize))
+	} else {
+		res := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, res) })
+		v := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, v) })
+
+		for j := uint32(0); j < matCols; j++ {
+			if dataobjects.USE_FAST_CODE {
+				PermutedExtentsAssign(doctx, v, 0, 1, 0, mat, matOffset+j, matCols, 0, 1, nil, 0, uint64(matRows))
+			} else {
+				for i := uint32(0); i < matRows; i++ {
+					v[i] = mat[i*matCols+j+matOffset]
+				}
 			}
-		} else {
-			for i := uint32(0); i < uint32(len(res)); i++ {
-				ii := perm[i]
-				result[ii*matCols+j] = res[i]
+			NTT_Convolution(doctx, polyQC, 0, 0, v, 0, 0, res, 0, 0, blockSize, 1, root, q)
+			if dataobjects.USE_FAST_CODE {
+				PermutedExtentsAssign(doctx, result, j, 0, matCols, res, 0, 1, 0, 1, perm, 0, uint64(len(res)))
+			} else {
+				if perm == nil {
+					for i := uint32(0); i < uint32(len(res)); i++ {
+						result[i*matCols+j] = res[i]
+					}
+				} else {
+					for i := uint32(0); i < uint32(len(res)); i++ {
+						ii := perm[i]
+						result[ii*matCols+j] = res[i]
+					}
+				}
 			}
 		}
 	}
 }
 
-func CirculantVectorMul(ctx context.Context, blockSize, q, root uint32, seed int64, v, perm []uint32) []uint32 {
+func CirculantVectorMul(ctx context.Context, blockSize, q, root uint32, seed int64, v []uint32, vo uint32, perm []uint32) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
-	polyQC := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(polyQC) })
+	polyQC := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, polyQC) })
 
-	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
-		utils.RandomizeVectorWithModulusAndSeed(polyQC, blockSize, 1, false, q, seed)
-		for t := uint32(1); t < blockSize/2; t++ {
-			polyQC[t], polyQC[blockSize-t] = polyQC[blockSize-t], polyQC[t]
-		}
+	if dataobjects.USE_FAST_CODE {
+		utils.RandomizeVectorWithModulusAndSeed(doctx, polyQC, 1, blockSize, false, true, q, seed, 0)
 	} else {
 		rng := rand.New(rand.NewSource(seed))
 		polyQC[0] = uint32(rng.Intn(int(q)))
@@ -322,21 +362,21 @@ func CirculantVectorMul(ctx context.Context, blockSize, q, root uint32, seed int
 		}
 	}
 
-	tmpA := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(tmpA) })
-	tmpB := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	frame.Defer(func() { dataobjects.Aligned1DFree(tmpB) })
-	conv := dataobjects.AlignedMake[uint32](uint64(blockSize))
-	NTT_Convolution(polyQC, v, tmpA, tmpB, conv, blockSize, root, q)
+	conv := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+	NTT_Convolution(doctx, polyQC, 0, 0, v, vo, 0, conv, 0, 0, blockSize, 1, root, q)
 
 	if perm == nil {
 		return conv
 	} else {
-		frame.Defer(func() { dataobjects.Aligned1DFree(conv) })
-		result := dataobjects.AlignedMake[uint32](uint64(blockSize))
-		for i := uint32(0); i < blockSize; i++ {
-			ii := perm[i]
-			result[ii] = conv[i]
+		frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, conv) })
+		result := dataobjects.DoAlignedMake[uint32](doctx, uint64(blockSize))
+		if dataobjects.USE_FAST_CODE {
+			PermutedExtentsAssign(doctx, result, 0, 0, 1, conv, 0, 1, 0, 1, perm, 0, uint64(blockSize))
+		} else {
+			for i := uint32(0); i < blockSize; i++ {
+				ii := perm[i]
+				result[ii] = conv[i]
+			}
 		}
 		return result
 	}
@@ -344,25 +384,34 @@ func CirculantVectorMul(ctx context.Context, blockSize, q, root uint32, seed int
 
 // Q has the form [I // C] where C is a circulant matrix
 func GetQuasiCyclicMatrix(ctx context.Context, blockSize, q uint32, seed int64, perm []uint32) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
 	row := 2 * blockSize
-	Q := dataobjects.AlignedMake[uint32](uint64(row) * uint64(blockSize))
+	Q := dataobjects.DoAlignedMake[uint32](doctx, uint64(row)*uint64(blockSize))
 
 	S := GetCirculantMatrix(ctx, blockSize, q, seed)
-	frame.Defer(func() { dataobjects.Aligned1DFree(S) })
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, S) })
 
-	for i := uint32(0); i < blockSize; i++ {
-		ii := perm[i]
-		Q[ii*blockSize+i] = 1
+	if dataobjects.USE_FAST_CODE {
+		PermutedExtentsAssign(doctx, Q, 0, 1, blockSize, nil, 0, 0, 1, 1, perm, 0, uint64(blockSize))
+	} else {
+		for i := uint32(0); i < blockSize; i++ {
+			ii := perm[i]
+			Q[ii*blockSize+i] = 1
+		}
 	}
-	for i := uint32(0); i < blockSize; i++ {
-		ii := perm[i+blockSize]
-		if dataobjects.USE_FAST_CODE {
-			dataobjects.FieldCopyVector(Q, uint64(ii*blockSize), S, uint64(i*blockSize), uint64(blockSize))
-		} else {
-			copy(Q[ii*blockSize:(ii+1)*blockSize], S[i*blockSize:(i+1)*blockSize])
+	if dataobjects.USE_FAST_CODE {
+		PermutedExtentsAssign(doctx, Q, 0, 0, blockSize, S, 0, blockSize, 0, uint64(blockSize), perm, blockSize, uint64(blockSize))
+	} else {
+		for i := uint32(0); i < blockSize; i++ {
+			ii := perm[i+blockSize]
+			if dataobjects.USE_FAST_CODE {
+				dataobjects.FieldCopyVector(doctx, Q, uint64(ii*blockSize), S, uint64(i*blockSize), uint64(blockSize))
+			} else {
+				copy(Q[ii*blockSize:(ii+1)*blockSize], S[i*blockSize:(i+1)*blockSize])
+			}
 		}
 	}
 
@@ -370,15 +419,16 @@ func GetQuasiCyclicMatrix(ctx context.Context, blockSize, q uint32, seed int64, 
 }
 
 func GetCirculantMatrix(ctx context.Context, k, q uint32, seed int64) []uint32 {
+	doctx := dataobjects.GetDeferralDoContext(ctx)
 	frame := dataobjects.MakeDeferralFrame(ctx)
 	defer frame.Close()
 
-	S := dataobjects.AlignedMake[uint32](uint64(k) * uint64(k))
+	S := dataobjects.DoAlignedMake[uint32](doctx, uint64(k)*uint64(k))
 
-	poly := dataobjects.AlignedMake[uint32](uint64(k))
-	frame.Defer(func() { dataobjects.Aligned1DFree(poly) })
-	if dataobjects.USE_FAST_CODE && USE_FAST_CODE_FOR_CIRCULANT {
-		utils.RandomizeVectorWithModulusAndSeed(poly, k, 1, false, q, seed)
+	poly := dataobjects.DoAlignedMake[uint32](doctx, uint64(k))
+	frame.Defer(func() { dataobjects.DoAligned1DFree(doctx, poly) })
+	if dataobjects.USE_FAST_CODE {
+		utils.RandomizeVectorWithModulusAndSeed(doctx, poly, k, 1, false, false, q, seed, 0)
 	} else {
 		rng := rand.New(rand.NewSource(seed))
 		for t := uint32(0); t < k; t++ {
@@ -387,15 +437,19 @@ func GetCirculantMatrix(ctx context.Context, k, q uint32, seed int64) []uint32 {
 	}
 
 	if dataobjects.USE_FAST_CODE {
-		for t := uint32(0); t < k; t++ {
-			dataobjects.FieldCopyVector(S, uint64(t*k+t), poly, 0, uint64(k-t))
-			dataobjects.FieldCopyVector(S, uint64(t*k), poly, uint64(k-t), uint64(t))
-		}
+		CircularCopy(doctx, S, poly, uint64(k))
 	} else {
-		for i := uint32(0); i < k; i++ {
+		if dataobjects.USE_FAST_CODE {
 			for t := uint32(0); t < k; t++ {
-				copy(S[t*k+t:t*k+k], poly[0:k-t])
-				copy(S[t*k+0:t*k+t], poly[k-t:k])
+				dataobjects.FieldCopyVector(doctx, S, uint64(t*k+t), poly, 0, uint64(k-t))
+				dataobjects.FieldCopyVector(doctx, S, uint64(t*k), poly, uint64(k-t), uint64(t))
+			}
+		} else {
+			for i := uint32(0); i < k; i++ {
+				for t := uint32(0); t < k; t++ {
+					copy(S[t*k+t:t*k+k], poly[0:k-t])
+					copy(S[t*k+0:t*k+t], poly[k-t:k])
+				}
 			}
 		}
 	}

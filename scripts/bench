@@ -11,11 +11,21 @@ else
   export CC=$DIR/gcc-13.debug
   export CXX=$DIR/g++-13.debug
 fi
-if test -z "$EMVP_USE_CUDA"
+go clean -cache
+if test -n "$EMVP_USE_CUDA"
 then
-  exec time go test $CGO_FLAGS -bench=. ./...
-else
-  export CGO_CPPFLAGS="-DUSE_FAST_CODE_WITH_CUDA"
+  export CGO_CPPFLAGS="-DUSE_FAST_CODE_WITH_CUDA $EXTRA_CGO_CPPFLAGS"
   # add flags for compile-only with debug: -c -gcflags="all=-N -l" -ldflags="-linkmode=external -extldflags=-Wl,-E"
-  exec time go test $CGO_FLAGS -tags=cuda -bench=. ./...
+  export CGO_FLAGS="$CGO_FLAGS  -tags=cuda"
+fi
+
+if test -n "$EMVP_RUN_SINGLE"
+then
+  time go test $CGO_FLAGS ./...
+else
+  time go test $CGO_FLAGS -bench='^$' ./mvp # not ./... since ./pir is not covered
+  for b in BenchmarkCleartextServerExecution BenchmarkRingSLSNEncoding BenchmarkRingSLSNQuery BenchmarkSLSNGenerateTDM BenchmarkSLSNEncoding BenchmarkSLSNQuery BenchmarkSLSNAnswer BenchmarkSLSNDecode
+  do
+    time go test $CGO_FLAGS -bench=$b -run='^$' ./mvp # not ./... since ./pir is not covered
+  done
 fi

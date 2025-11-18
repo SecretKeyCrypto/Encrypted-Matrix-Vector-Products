@@ -1,18 +1,21 @@
 #ifndef _UTIL_PLAINRND_H
 #define _UTIL_PLAINRND_H
 
-#include <stdint.h>
+#include <cstdint>
+#include "../dataobjects/docontext.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void plain_randomize_vector(uint32_t* data, uint32_t M, uint32_t N, bool transpose);
-void plain_randomize_vector_with_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, int64_t seed);
-void plain_randomize_vector_with_modulus(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus);
-void plain_randomize_vector_with_modulus_and_seed(uint32_t* data, uint32_t M, uint32_t N, bool transpose, uint32_t modulus, int64_t seed);
+bool plain_randomize_vector(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant);
+bool plain_randomize_vector_with_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, int64_t seed, int64_t offset);
+bool plain_randomize_vector_with_modulus(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus);
+bool plain_randomize_vector_with_modulus_and_seed(DoContext* ctx, uint32_t* data, uint32_t M, uint32_t N, bool transpose, bool circulant, uint32_t modulus, int64_t seed, int64_t offset);
 
-void plain_lpn_noise_vector(uint32_t* data, uint64_t length, double epsi, uint32_t modulus);
+bool plain_lpn_noise_vector(DoContext* ctx, uint32_t* r, uint64_t ro, uint64_t length, double epsi, uint32_t modulus, int64_t seed, int64_t offset);
+
+bool plain_random_permutation(DoContext* ctx, uint32_t* perm, uint32_t n, int64_t seed, int64_t offset);
 
 #ifdef __cplusplus
 }

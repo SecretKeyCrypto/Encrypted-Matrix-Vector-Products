@@ -185,6 +185,12 @@ func BenchmarkAnswer(b *testing.B) {
 }
 
 func BenchmarkDecode(b *testing.B) {
+	ctx := dataobjects.MakeDeferralContextDefault()
+	defer dataobjects.CloseDeferralContext(ctx)
+	frame := dataobjects.MakeDeferralFrame(ctx)
+	defer frame.Close()
+	doctx := dataobjects.GetDeferralDoContext(ctx)
+
 	row, col, k, block := getParams()
 
 	pi := &BasePIR{
@@ -204,13 +210,13 @@ func BenchmarkDecode(b *testing.B) {
 
 	n := uint64(pi.Params.PackedSize * pi.Params.NumberOfBlocks)
 	res_1 := dataobjects.AlignedMake[uint32](n)
-	defer dataobjects.Aligned1DFree(res_1)
+	frame.Defer(func() { dataobjects.Aligned1DFree(res_1) })
 	res_2 := dataobjects.AlignedMake[uint32](n)
-	defer dataobjects.Aligned1DFree(res_2)
+	frame.Defer(func() { dataobjects.Aligned1DFree(res_2) })
 	for i := 0; i < b.N; i++ {
 		index := uint64(rand.Intn(int(row)))
-		utils.RandomPrimeFieldVector(res_1, 2^32)
-		utils.RandomPrimeFieldVector(res_2, 2^32)
+		utils.RandomPrimeFieldVector(doctx, res_1, 2^32)
+		utils.RandomPrimeFieldVector(doctx, res_2, 2^32)
 		flip := utils.RandomizeFlipVector(pi.Params.NumberOfBlocks)
 		mask := rand.Uint32()
 
@@ -286,8 +292,8 @@ func TestMixedSLSNAnswer(t *testing.T) {
 
 	var totalDuration time.Duration
 
-	vec_1 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 1)
-	vec_2 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 2)
+	vec_1 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 1, 0)
+	vec_2 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 2, 0)
 	vec_sum := make([]uint32, pi.Params.CodewordLength)
 	for j := range vec_1 {
 		vec_sum[j] = vec_1[j] ^ vec_2[j]
