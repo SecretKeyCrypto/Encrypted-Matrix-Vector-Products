@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-func VecMatMulF4(bit1Result, bitPResult, bit1Matrix, bitPMatrix, bit1Vec, bitPVec []uint32, rows, cols uint32) {
+func cVecMatMulF4(bit1Result, bitPResult, bit1Matrix, bitPMatrix, bit1Vec, bitPVec []uint32, rows, cols uint32) {
 	// (a + bp) * (x + yp)
 	ax := make([]uint32, cols)
 	by := make([]uint32, cols)
@@ -26,7 +26,7 @@ func VecMatMulF4(bit1Result, bitPResult, bit1Matrix, bitPMatrix, bit1Vec, bitPVe
 	}
 }
 
-func VecMatrixMulF2(result, matrix, vector []uint32, rows, cols uint32) {
+func cVecMatrixMulF2(result, matrix, vector []uint32, rows, cols uint32) {
 	cVector := (*C.uint32_t)(unsafe.Pointer(&vector[0]))
 	cMatrix := (*C.uint32_t)(unsafe.Pointer(&matrix[0]))
 	cResult := (*C.uint32_t)(unsafe.Pointer(&result[0]))
@@ -35,7 +35,7 @@ func VecMatrixMulF2(result, matrix, vector []uint32, rows, cols uint32) {
 }
 
 // For 2D Split LSN
-func MatrixColXORByBlock2D(vector_1, vector_2, matrixData, result_1, result_2 []uint32, rows, cols, block_size uint32) {
+func cMatrixColXORByBlock2D(vector_1, vector_2, matrixData, result_1, result_2 []uint32, rows, cols, block_size uint32) {
 
 	cVector_1 := (*C.uint32_t)(unsafe.Pointer(&vector_1[0]))
 	cVector_2 := (*C.uint32_t)(unsafe.Pointer(&vector_2[0]))
@@ -48,7 +48,7 @@ func MatrixColXORByBlock2D(vector_1, vector_2, matrixData, result_1, result_2 []
 }
 
 // For 1D Split LSN
-func MatrixColXORByBlock(vector, matrixData, result []uint32, rows, cols, block_size uint32) {
+func cMatrixColXORByBlock(vector, matrixData, result []uint32, rows, cols, block_size uint32) {
 	cVector := (*C.uint32_t)(unsafe.Pointer(&vector[0]))
 	cMatrix := (*C.uint32_t)(unsafe.Pointer(&matrixData[0]))
 	cResult := (*C.uint32_t)(unsafe.Pointer(&result[0]))

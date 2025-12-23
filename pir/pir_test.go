@@ -1,12 +1,15 @@
 package pir
 
 import (
+	"RandomLinearCodePIR/dataobjects"
 	"RandomLinearCodePIR/utils"
 	"fmt"
 	"math/rand"
 	"testing"
 	"time"
 )
+
+const VERBOSE_PRINTS = false
 
 /*
 	 ================================================================================
@@ -143,7 +146,7 @@ func BenchmarkQueryGeneration(b *testing.B) {
 	b.StopTimer()
 
 	fmt.Printf("\nBenchmark Query Generation For m = %d, l = %d, k = %d\n", row, col, k)
-	fmt.Printf("\nCommunicatio Cost for %d MB database is %f KB\n", (row*col)>>20, float64(len(pirQuery.Vector_1)+len(pirQuery.Vector_2))/float64(1024))
+	fmt.Printf("\nCommunication Cost for %d MB database is %f KB\n", (row*col)>>20, float64(len(pirQuery.Vector_1)+len(pirQuery.Vector_2))/float64(1024))
 	fmt.Printf("\tAverage Query Time with repeat times: %d: %v \n\n", b.N, totalDuration/time.Duration(b.N))
 }
 
@@ -182,6 +185,12 @@ func BenchmarkAnswer(b *testing.B) {
 }
 
 func BenchmarkDecode(b *testing.B) {
+	ctx := dataobjects.MakeDeferralContextDefault()
+	defer dataobjects.CloseDeferralContext(ctx)
+	frame := dataobjects.MakeDeferralFrame(ctx)
+	defer frame.Close()
+	doctx := dataobjects.GetDeferralDoContext(ctx)
+
 	row, col, k, block := getParams()
 
 	pi := &BasePIR{
@@ -199,10 +208,15 @@ func BenchmarkDecode(b *testing.B) {
 	var totalDuration time.Duration
 	b.ResetTimer()
 
+	n := uint64(pi.Params.PackedSize * pi.Params.NumberOfBlocks)
+	res_1 := dataobjects.AlignedMake[uint32](n)
+	frame.Defer(func() { dataobjects.Aligned1DFree(res_1) })
+	res_2 := dataobjects.AlignedMake[uint32](n)
+	frame.Defer(func() { dataobjects.Aligned1DFree(res_2) })
 	for i := 0; i < b.N; i++ {
 		index := uint64(rand.Intn(int(row)))
-		res_1 := utils.RandomPrimeFieldVector(pi.Params.PackedSize*pi.Params.NumberOfBlocks, 2^32)
-		res_2 := utils.RandomPrimeFieldVector(pi.Params.PackedSize*pi.Params.NumberOfBlocks, 2^32)
+		utils.RandomPrimeFieldVector(doctx, res_1, 2^32)
+		utils.RandomPrimeFieldVector(doctx, res_2, 2^32)
 		flip := utils.RandomizeFlipVector(pi.Params.NumberOfBlocks)
 		mask := rand.Uint32()
 
@@ -278,18 +292,22 @@ func TestMixedSLSNAnswer(t *testing.T) {
 
 	var totalDuration time.Duration
 
-	vec_1 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 1)
-	vec_2 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 2)
+	vec_1 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 1, 0)
+	vec_2 := utils.RandomizeBinaryVectorWithSeed(pi.Params.CodewordLength, 2, 0)
 	vec_sum := make([]uint32, pi.Params.CodewordLength)
 	for j := range vec_1 {
 		vec_sum[j] = vec_1[j] ^ vec_2[j]
 	}
-	fmt.Println(vec_1)
-	fmt.Println(vec_2)
+	if VERBOSE_PRINTS {
+		fmt.Println(vec_1)
+		fmt.Println(vec_2)
+	}
 	start := time.Now()
 	ans := pi.Answer(&encodedMatrix, &MixedSLSNPIRQuery{vec: VectorF4{Cols: col, Bit1: vec_1, BitP: vec_2, BitSum: vec_sum}})
-	fmt.Println(ans)
 	totalDuration += time.Since(start)
+	if VERBOSE_PRINTS {
+		fmt.Println(ans)
+	}
 
 	fmt.Printf("\nBenchmark Server Response For Encoded Database with %d x %d entires of size ~%fMB. \n",
 		encodedMatrix.Rows, encodedMatrix.Cols, float64(encodedMatrix.Rows/1024.0)*float64(encodedMatrix.Cols)/1024.0*32/8.0)

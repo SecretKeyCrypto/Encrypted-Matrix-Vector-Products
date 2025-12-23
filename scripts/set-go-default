@@ -1,0 +1,2 @@
+export CGO_FLAGS="-bench=."
+export EMVP_RUN_SINGLE=

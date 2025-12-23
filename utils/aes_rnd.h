@@ -203,6 +203,17 @@ public:
         return reseed(seed);
     }
 
+    inline void seek(int64_t pos_low, int64_t pos_high = 0) {
+#ifdef _WIN32
+        ctr[0] = pos_low;
+        ctr[1] = pos_high;
+#else
+        int64_t* p_ctr = reinterpret_cast<int64_t*>(&ctr);
+        p_ctr[0] = pos_low;
+        p_ctr[1] = pos_high;
+#endif
+    }
+
     // ✅ random_bytes now uses enc(), no aes_encrypt_block
     inline void random_bytes(uint8_t *data) {
 #ifdef _WIN32

@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "hdcommon.h"
+
 #define _MOD_SIMD_ALIGNED_LOADSTORE
 
 const uint32_t _not_prime_power = ~0U;
@@ -44,7 +46,14 @@ inline uint32_t _fermat_prime_power(uint32_t modulus) {
     }
 }
 
-inline bool _nosimd_mod_op(uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
+inline bool _nosimd_apply_bitmask(const uint32_t* in, uint32_t* out, uint32_t bitmask, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        out[i] = in[i] & bitmask;
+    }
+    return true;
+}
+
+inline bool _nosimd_mod_op(const uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
     for (size_t i = 0; i < length; ++i) {
         out[i] = in[i] % modulus;
     }
@@ -71,6 +80,25 @@ inline bool _nosimd_mod_op(uint32_t* in, uint32_t* out, uint32_t modulus, size_t
 #define _MOD_SIMD_FASTER
 
 #ifdef __SSE2__
+inline bool _sse2_apply_bitmask(const uint32_t* in, uint32_t* out, uint32_t bitmask, size_t length) {
+    size_t i = 0;
+    __m128i mask = _mm_set1_epi32(bitmask);
+
+    // Process 4 elements at a time
+    for (; i + 4 <= length; i += 4) {
+        __m128i input = _mm_loadu_si128((__m128i*)&in[i]);
+        __m128i result = _mm_and_si128(input, mask);
+        _mm_storeu_si128((__m128i*)&out[i], result);
+    }
+
+    // Handle remaining elements
+    for (; i < length; ++i) {
+        out[i] = in[i] & bitmask;
+    }
+
+    return true;
+}
+
 class _sse2_fermat_prime {
     uint32_t k;
     uint32_t modulus;
@@ -147,7 +175,7 @@ public:
 #endif
         return (uint32_t)r;
     }
-    inline void apply(__m128i* out, __m128i* in) const {
+    inline void apply(__m128i* out, const __m128i* in) const {
 #ifdef _MOD_SIMD_ALIGNED_LOADSTORE
         __m128i x = _mm_load_si128(in);
 #else
@@ -164,7 +192,7 @@ public:
         _mm_storeu_si128(out, r);
 #endif
     }
-    inline void apply(uint32_t* out, uint32_t* in) const {
+    inline void apply(uint32_t* out, const uint32_t* in) const {
         uint32_t T = *in >> shift;
         uint32_t U = *in & bitmask;
         uint32_t r = compute(T, U);
@@ -172,7 +200,7 @@ public:
     }
 };
 
-inline bool _sse2_fermat_prime_mod_op(uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
+inline bool _sse2_fermat_prime_mod_op(const uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
     _sse2_fermat_prime op(modulus);
     if (!op.init()) return false;
 
@@ -188,6 +216,25 @@ inline bool _sse2_fermat_prime_mod_op(uint32_t* in, uint32_t* out, uint32_t modu
 #endif
 
 #ifdef __AVX2__
+inline bool _avx2_apply_bitmask(const uint32_t* in, uint32_t* out, uint32_t bitmask, size_t length) {
+    size_t i = 0;
+    __m256i mask = _mm256_set1_epi32(bitmask);
+
+    // Process 8 elements at a time
+    for (; i + 8 <= length; i += 8) {
+        __m256i input = _mm256_loadu_si256((__m256i*)&in[i]);
+        __m256i result = _mm256_and_si256(input, mask);
+        _mm256_storeu_si256((__m256i*)&out[i], result);
+    }
+
+    // Handle remaining elements
+    for (; i < length; ++i) {
+        out[i] = in[i] & bitmask;
+    }
+
+    return true;
+}
+
 class _avx2_fermat_prime {
     uint32_t k;
     uint32_t modulus;
@@ -262,7 +309,7 @@ public:
 #endif
         return (uint32_t)r;
     }
-    inline void apply(__m256i* out, __m256i* in) const {
+    inline void apply(__m256i* out, const __m256i* in) const {
 #ifdef _MOD_SIMD_ALIGNED_LOADSTORE
         __m256i x = _mm256_load_si256(in);
 #else
@@ -279,7 +326,7 @@ public:
         _mm256_storeu_si256(out, r);
 #endif
     }
-    inline void apply(uint32_t* out, uint32_t* in) const {
+    inline void apply(uint32_t* out, const uint32_t* in) const {
         uint32_t T = *in >> shift;
         uint32_t U = *in & bitmask;
         uint32_t r = compute(T, U);
@@ -287,7 +334,7 @@ public:
     }
 };
 
-inline bool _avx2_fermat_prime_mod_op(uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
+inline bool _avx2_fermat_prime_mod_op(const uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
     _avx2_fermat_prime op(modulus);
     if (!op.init()) return false;
 
@@ -302,7 +349,17 @@ inline bool _avx2_fermat_prime_mod_op(uint32_t* in, uint32_t* out, uint32_t modu
 }
 #endif
 
-inline bool vector_mod_op(uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
+inline bool vector_mod_op(const uint32_t* in, uint32_t* out, uint32_t modulus, size_t length) {
+    if ((modulus & (modulus - 1)) == 0) { // power of 2
+        uint32_t bitmask = bitmask_for(modulus);
+#if defined(__AVX2__)
+        return _avx2_apply_bitmask(in, out, bitmask, length);
+#elif defined(__SSE2__)
+        return _sse2_apply_bitmask(in, out, bitmask, length);
+#else
+        return _nosimd_apply_bitmask(in, out, bitmask, length);
+#endif
+    }
     if (~_fermat_prime_power(modulus) != 0) {
 #if defined(__AVX2__)
         return _avx2_fermat_prime_mod_op(in, out, modulus, length);

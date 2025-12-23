@@ -1,0 +1,5 @@
+export CXXFLAGS="-g -O0"
+export NVCCFLAGS="-g -O0 -lineinfo"
+export CGO_CFLAGS="-g -O0"
+export CGO_CXXFLAGS="-g -O0"
+export EXTRA_NVCC_FLAGS="-keep -keep-dir ./nvcc_tmp"
