@@ -1,3 +1,16 @@
+# Code Repository for the EMVP Project
+
+This repository includes various pieces of code related to the two papers:
+
+* Secret-Key PIR from Random Linear Codes (https://eprint.iacr.org/2025/646).
+  Caicai Chen, Yuval Ishai, Tamer Mour, Alon Rosen.
+
+* Encrypted Matrix-Vector Products from Secret Dual Codes (https://eprint.iacr.org/2025/858).
+  Fabrice Benhamouda, Caicai Chen, Shai Halevi, Yuval Ishai, 
+  Hugo Krawczyk, Tamer Mour, Tal Rabin, Alon Rosen.
+
+Most of the code is under the root directory of this repository, as described below. Some code in a separate project is under the `experiments-attacks` subdirectory, see the [README](./experiments-attacks/README.md) in that subdirectory for details.
+
 ## 🔧 Installation
 
 ### 🛠 Prerequisites
