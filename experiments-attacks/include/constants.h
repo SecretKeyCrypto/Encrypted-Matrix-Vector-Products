@@ -3,7 +3,7 @@
 
 namespace emvpexpr {
 /// Dimension of each block, can be overwritten by a command-line argument
-constexpr int kDefaultBlockSize = 8;
+constexpr int kDefaultBlockSize = 4;
 
 /// Modulus: This is a 29-bit prime, can be overwritten by a command-line argument
 constexpr long kDefaultMod = 479001599;

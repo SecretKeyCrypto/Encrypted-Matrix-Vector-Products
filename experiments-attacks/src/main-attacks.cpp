@@ -13,10 +13,27 @@ using namespace emvpexpr;
 using namespace NTL;
 
 namespace emvpexpr {
-constexpr int kBlocksPerRank = 2;    // ratio between code rank and block size (only used locally)
-// amazonq-ignore-next-line
+int kBlocksPerRank = 2;              // ratio between code rank and block size - can be changed via command-line argument
+int kBlocksPerLength = 0;            // ratio between code length and block size (default: 2*kBlocksPerRank) - must be <= 2*kBlocksPerRank
 long kMod = kDefaultMod;             // modulus - can be changed via command-line argument
 int kBlockSize = kDefaultBlockSize;  // block size - can be changed via command-line argument
+}
+
+// Truncate a code matrix from k-by-n' to k-by-n by dropping the last n'-n columns,
+// and return a new PRvector with the truncated matrix.
+PRvector truncateCode(PRvector& prv, int n) {
+    auto& M = prv.getMat();
+    int k = M.NumRows();
+    int nOrig = M.NumCols();
+    if (n >= nOrig) return prv;  // nothing to truncate
+
+    NTL::mat_zz_p truncated(NTL::INIT_SIZE, k, n);
+    for (int i = 0; i < k; i++) {
+        for (int j = 0; j < n; j++) {
+            truncated[i][j] = M(i, j);
+        }
+    }
+    return PRvector(Matrix(truncated));
 }
 
 // Test the rank of a matrix whose rows are degree-d multilinear products
@@ -135,7 +152,7 @@ bool testDegreeD(int d, std::vector<NTL::vec_zz_p>& vectors) {
 
 // Analyze degree-d algebraic attacks for a given code
 void analyzeAlgebraicAttack(PRvector& prv, int d) {
-    if (d < 1 || d > 3) {
+    if (d < 1 || d > 4) {
         std::cout << "d="<<d<<" is too small or too big\n";
         return;
     }
@@ -152,7 +169,7 @@ void analyzeAlgebraicAttack(PRvector& prv, int d) {
     if (d==1) { // For degree 1, test only multilinear
         testMultilinear(1, vectors, k);
     } else {
-        if (testDegreeD(d, vectors)) { // found degree-d annialating polynomial
+        if (testDegreeD(d, vectors)) { // found degree-d annihilating polynomial
             testMultilinear(d, vectors, k);  // check for such multilinear poly
         }
     }
@@ -184,17 +201,26 @@ int main(int argc, char* argv[]) {
     // amazonq-ignore-next-line
     if (argc > 1) kMod = std::atol(argv[1]);
     if (argc > 2) kBlockSize = std::atoi(argv[2]);
+    if (argc > 3) kBlocksPerRank = std::atoi(argv[3]);
+    if (argc > 4) kBlocksPerLength = std::atoi(argv[4]);
+    if (kBlocksPerLength <= 0) kBlocksPerLength = 2*kBlocksPerRank;
+    if (kBlocksPerLength > 2*kBlocksPerRank) {
+        std::cout << "Error: kBlocksPerLength must be <= 2*kBlocksPerRank (n/k <= 2)\n";
+        return 1;
+    }
 
     std::cout << "Testing algebraic attacks against EMVP with 1D-SLSN\n";
-    std::cout << "Usage: " << argv[0] << " [kMod [kBlockSize]]" << std::endl;
+    std::cout << "Usage: " << argv[0] << " [kMod [kBlockSize [kBlocksPerRank [kBlocksPerLength]]]]" << std::endl;
     // amazonq-ignore-next-line
     std::cout << "  kMod = " << kMod << " (default: " << kDefaultMod << ")" << std::endl;
     // amazonq-ignore-next-line
-    std::cout << "  kBlockSize = " << kBlockSize << " (default: " << kDefaultBlockSize << ")\n" << std::endl;
+    std::cout << "  kBlockSize = " << kBlockSize << " (default: " << kDefaultBlockSize << ")" << std::endl;
+    std::cout << "  kBlocksPerRank = " << kBlocksPerRank << " (default: 2)" << std::endl;
+    std::cout << "  kBlocksPerLength = " << kBlocksPerLength << " (default: 2*kBlocksPerRank)\n" << std::endl;
     
     NTL::zz_p::init(kMod);
     int k = kBlockSize*kBlocksPerRank;
-    int n = k*2;
+    int n = kBlockSize*kBlocksPerLength;
 
     std::cout << "Two types of codes:\n";
     // amazonq-ignore-next-line
@@ -212,12 +238,15 @@ int main(int argc, char* argv[]) {
 #endif
 
     std::cout << "\n*********** Full rank quasi-circular code: *********\n";
-    {PRvector prv = quasiCircular(k);
+    {PRvector prvFull = quasiCircular(k);
+    PRvector prv = truncateCode(prvFull, n);
     auto& C = prv.getMat();
+    std::cout << "Quasi-circular "<<k<<"x"<<2*k<<" code, truncated to "<<k<<"x"<<n<<std::endl;
     // amazonq-ignore-next-line
     std::cout << "Rank of C = " << rankOfSubmat(C, kBlocksPerRank*2) << std::endl;
-    analyzeAlgebraicAttack(prv, kBlocksPerRank);
-    analyzeAlgebraicAttack(prv, kBlocksPerRank+1);
+    int startDeg = std::min(kBlocksPerRank, 2);
+    for (int d = startDeg; d <= kBlocksPerRank+1; d++)
+        analyzeAlgebraicAttack(prv, d);
     }
 
     std::cout << "\n\n*********** "<<1<<"-rank-deficient code: *********\n";

@@ -34,3 +34,6 @@ target_link_libraries(emvptools PUBLIC
 # Create executable
 add_executable(algebraic-attacks src/main-attacks.cpp)
 target_link_libraries(algebraic-attacks PRIVATE emvptools)
+
+add_executable(small-field-attacks src/small-field-attacks.cpp)
+target_link_libraries(small-field-attacks PRIVATE emvptools)
