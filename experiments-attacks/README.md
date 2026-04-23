@@ -22,7 +22,11 @@ cmake ..
 make
 ```
 
-## Example Run
+This builds two executables:
+- `algebraic-attacks` — tests algebraic attacks with a large prime (default p ≈ 2²⁹), using quasi-cyclic and rank-deficient codes.
+- `small-field-attacks` — tests degree-2 algebraic attacks over F₃ with random full-rank codes, running many iterations and reporting statistics.
+
+## Example Run (algebraic-attacks)
 
 ```bash
 % ./algebraic-attacks 97 4
@@ -68,3 +72,25 @@ Rank of degree-2 153x153 matrix is 120
 Testing 2-multilinear 16x16 matrix (b=4, lastB=4)
 Rank of 2-block-multilinear matrix is 8
 ```
+
+## Example Run (small-field-attacks)
+
+```bash
+% ./small-field-attacks
+Testing algebraic attacks against EMVP with 1D-SLSN over F3
+Usage: ./small-field-attacks [kBlockSize [kBlocksPerRank [kBlocksPerLength]]]
+  kBlockSize = 4 (default: 4)
+  kBlocksPerRank = 3 (default: 3)
+  kBlocksPerLength = 4 (default: kBlocksPerRank+1)
+
+Random 12x16 codes
+
+=== Summary: 0 out of 500 codes had a degree-2 annihilating polynomial (3 non-full-rank codes discarded) ===
+```
+
+Parameters:
+- `kBlockSize` — dimension of each block (default: 4)
+- `kBlocksPerRank` — number of blocks in the code rank, so k = kBlockSize × kBlocksPerRank (default: 3)
+- `kBlocksPerLength` — number of blocks in the code length, so n = kBlockSize × kBlocksPerLength (default: kBlocksPerRank+1, must be ≤ 2×kBlocksPerRank)
+
+Set `QUASI_CYCLIC` to 1 at the top of the source file to use truncated quasi-cyclic codes instead of random codes.
